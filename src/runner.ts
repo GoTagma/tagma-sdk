@@ -151,9 +151,11 @@ export async function runSpawn(
 
   const durationMs = elapsed();
 
-  // If we killed the process but it had already exited with a real code
-  // before our signal landed, don't treat it as a timeout.
-  if (killedByUs && exitCode !== 0) {
+  // We initiated the kill (timeout or abort) — always treat as non-success
+  // regardless of exit code. A process that catches SIGTERM and exits 0 still
+  // hit the timeout; letting it pass as success would unblock downstream tasks
+  // incorrectly.
+  if (killedByUs) {
     return {
       exitCode: -1,
       stdout,

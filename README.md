@@ -108,10 +108,39 @@ Parses YAML, resolves inheritance, expands templates, and validates the configur
 
 ### `runPipeline(config, workDir, options?): Promise<EngineResult>`
 
-Executes the pipeline. Returns `{ success, summary, states }`.
+Executes the pipeline. Returns `{ success, runId, logPath, summary, states }`.
 
 Options:
 - `approvalGateway` -- custom `ApprovalGateway` instance (defaults to `InMemoryApprovalGateway`)
+- `signal` -- `AbortSignal` to cancel the run externally
+- `onEvent` -- callback for real-time `PipelineEvent` updates (task status changes, pipeline start/end)
+- `maxLogRuns` -- number of per-run log directories to keep under `<workDir>/logs/` (default: 20)
+
+### `PipelineRunner`
+
+Higher-level wrapper for managing multiple concurrent pipeline runs — designed for sidecar / Tauri IPC scenarios where the frontend controls pipeline lifecycle by ID.
+
+```ts
+const runner = new PipelineRunner(config, workDir);
+
+// Subscribe before start — handler is called for every PipelineEvent
+const unsubscribe = runner.subscribe(event => {
+  tauriEmit('pipeline_event', { id: runner.instanceId, event });
+});
+
+runner.start(); // returns Promise<EngineResult>, idempotent
+
+// Cancel from IPC
+runner.abort();
+
+// After completion
+const states = runner.getStates(); // ReadonlyMap<taskId, TaskState>
+```
+
+Properties:
+- `instanceId` — stable ID assigned at construction, safe to use as a Map key before `start()`
+- `runId` — engine-assigned run ID, available after the first `pipeline_start` event (`null` until then)
+- `status` — `'idle' | 'running' | 'done' | 'aborted'`
 
 ### `loadPlugins(names: string[]): Promise<void>`
 
@@ -124,6 +153,83 @@ Attaches an interactive stdin-based approval handler.
 ### `attachWebSocketApprovalAdapter(gateway, options?): WebSocketApprovalAdapter`
 
 Starts a WebSocket server for remote approval decisions.
+
+### Config CRUD (`config-ops`)
+
+Pure, immutable helper functions for building and editing `RawPipelineConfig` in a visual editor. No runtime dependencies — safe to use in renderer processes.
+
+```ts
+import {
+  createEmptyPipeline, setPipelineField,
+  upsertTrack, removeTrack, moveTrack, updateTrack,
+  upsertTask, removeTask, moveTask, transferTask,
+  serializePipeline,
+} from '@tagma/sdk';
+
+// Build a config programmatically
+let config = createEmptyPipeline('my-pipeline');
+config = upsertTrack(config, { id: 'backend', name: 'Backend', tasks: [] });
+config = upsertTask(config, 'backend', { id: 'implement', prompt: 'Add /health endpoint' });
+
+// Sync back to YAML
+const yaml = serializePipeline(config);
+```
+
+| Function | Description |
+|---|---|
+| `createEmptyPipeline(name)` | Create a minimal pipeline config |
+| `setPipelineField(config, fields)` | Update top-level pipeline fields |
+| `upsertTrack(config, track)` | Insert or replace a track by id |
+| `removeTrack(config, trackId)` | Remove a track |
+| `moveTrack(config, trackId, toIndex)` | Reorder a track |
+| `updateTrack(config, trackId, fields)` | Patch track fields (not tasks) |
+| `upsertTask(config, trackId, task)` | Insert or replace a task |
+| `removeTask(config, trackId, taskId)` | Remove a task |
+| `moveTask(config, trackId, taskId, toIndex)` | Reorder a task within its track |
+| `transferTask(config, fromTrackId, taskId, toTrackId)` | Move a task across tracks |
+
+### `parseYaml(content: string): RawPipelineConfig`
+
+Parses a YAML string and returns the raw (unresolved) pipeline config. Use this when you need to edit and re-save YAML without losing relative paths or user-authored formatting — pass the result to `serializePipeline()` rather than going through `loadPipeline()`.
+
+### `deresolvePipeline(config: PipelineConfig, workDir: string): RawPipelineConfig`
+
+Converts a resolved `PipelineConfig` back to a `RawPipelineConfig` suitable for serialization. Strips injected defaults and converts absolute `cwd` paths back to relative so the output YAML is portable across machines.
+
+Use this when you have a programmatically modified resolved config and need to save it back to YAML:
+
+```ts
+// Correct: load → modify resolved config → deresolve → save
+const config = await loadPipeline(yaml, workDir);
+const modified = { ...config, name: 'renamed' };
+const savedYaml = serializePipeline(deresolvePipeline(modified, workDir));
+
+// Also correct: work entirely in raw space (preferred for visual editors)
+const raw = parseYaml(yaml);
+const updatedRaw = setPipelineField(raw, { name: 'renamed' });
+const savedYaml = serializePipeline(updatedRaw);
+```
+
+### `validateConfig(config: PipelineConfig): string[]`
+
+Validates a resolved pipeline config without executing it. Checks DAG structure (cycles, missing dependencies). Returns an array of error message strings — empty means valid.
+
+Use `validateRaw` for editing raw configs in a UI; use `validateConfig` after `resolveConfig` for a final pre-run check.
+
+### `validateRaw(config: RawPipelineConfig): ValidationError[]`
+
+Validates a raw pipeline config without resolving inheritance or executing anything. Returns a flat list of `{ path, message }` objects — empty array means valid.
+
+Checks: required fields, `prompt`/`command` exclusivity, `depends_on`/`continue_from` reference integrity, circular dependency detection.
+
+Does **not** check plugin registration (plugins may not be loaded at edit time).
+
+```ts
+const errors = validateRaw(draftConfig);
+if (errors.length > 0) {
+  errors.forEach(e => highlightNode(e.path, e.message));
+}
+```
 
 ## Related Packages
 

@@ -1,5 +1,5 @@
 import yaml from 'js-yaml';
-import { resolve } from 'path';
+import { resolve, relative } from 'path';
 import type {
   PipelineConfig, RawPipelineConfig, RawTrackConfig, RawTaskConfig,
   TrackConfig, TaskConfig, Permissions, MiddlewareConfig,
@@ -252,6 +252,76 @@ export function resolveConfig(raw: RawPipelineConfig, workDir: string): Pipeline
  */
 export function serializePipeline(config: PipelineConfig | RawPipelineConfig): string {
   return yaml.dump({ pipeline: config }, { lineWidth: 120, indent: 2 });
+}
+
+/**
+ * Convert a resolved PipelineConfig back to a RawPipelineConfig for serialization.
+ * Strips injected defaults and converts absolute cwd paths back to relative so the
+ * resulting YAML is portable across machines.
+ *
+ * Use this when you need to save a config that was previously loaded via
+ * loadPipeline(). For a pure load→edit→save cycle on raw YAML, prefer
+ * parseYaml() → edit RawPipelineConfig → serializePipeline().
+ */
+export function deresolvePipeline(config: PipelineConfig, workDir: string): RawPipelineConfig {
+  const tracks: RawTrackConfig[] = config.tracks.map(track => {
+    const trackCwdRel = track.cwd && track.cwd !== workDir
+      ? relative(workDir, track.cwd)
+      : undefined;
+    const effectiveTrackDriver = track.driver ?? config.driver ?? 'claude-code';
+
+    const tasks: RawTaskConfig[] = track.tasks.map(task => {
+      const taskCwdRel = task.cwd && task.cwd !== track.cwd
+        ? relative(workDir, task.cwd)
+        : undefined;
+
+      return {
+        id: task.id,
+        ...(task.name ? { name: task.name } : {}),
+        ...(task.prompt !== undefined ? { prompt: task.prompt } : {}),
+        ...(task.command !== undefined ? { command: task.command } : {}),
+        ...(task.depends_on?.length ? { depends_on: task.depends_on } : {}),
+        ...(task.trigger ? { trigger: task.trigger } : {}),
+        ...(task.continue_from ? { continue_from: task.continue_from } : {}),
+        ...(task.output ? { output: task.output } : {}),
+        ...(taskCwdRel ? { cwd: taskCwdRel } : {}),
+        ...(task.model_tier && task.model_tier !== 'medium' ? { model_tier: task.model_tier } : {}),
+        ...(task.driver && task.driver !== effectiveTrackDriver ? { driver: task.driver } : {}),
+        ...(task.timeout ? { timeout: task.timeout } : {}),
+        ...(task.middlewares !== undefined ? { middlewares: task.middlewares } : {}),
+        ...(task.completion ? { completion: task.completion } : {}),
+        ...(task.agent_profile ? { agent_profile: task.agent_profile } : {}),
+        ...(task.permissions && JSON.stringify(task.permissions) !== JSON.stringify(DEFAULT_PERMISSIONS)
+          ? { permissions: task.permissions }
+          : {}),
+      };
+    });
+
+    return {
+      id: track.id,
+      name: track.name,
+      ...(track.color ? { color: track.color } : {}),
+      ...(track.agent_profile ? { agent_profile: track.agent_profile } : {}),
+      ...(track.model_tier && track.model_tier !== 'medium' ? { model_tier: track.model_tier } : {}),
+      ...(track.driver && track.driver !== (config.driver ?? 'claude-code') ? { driver: track.driver } : {}),
+      ...(trackCwdRel ? { cwd: trackCwdRel } : {}),
+      ...(track.middlewares?.length ? { middlewares: track.middlewares } : {}),
+      ...(track.on_failure && track.on_failure !== 'skip_downstream' ? { on_failure: track.on_failure } : {}),
+      ...(track.permissions && JSON.stringify(track.permissions) !== JSON.stringify(DEFAULT_PERMISSIONS)
+        ? { permissions: track.permissions }
+        : {}),
+      tasks,
+    };
+  });
+
+  return {
+    name: config.name,
+    ...(config.driver ? { driver: config.driver } : {}),
+    ...(config.timeout ? { timeout: config.timeout } : {}),
+    ...(config.plugins?.length ? { plugins: config.plugins } : {}),
+    ...(config.hooks ? { hooks: config.hooks } : {}),
+    tracks,
+  };
 }
 
 // ═══ Offline Validation ═══

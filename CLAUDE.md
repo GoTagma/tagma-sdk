@@ -24,6 +24,9 @@ A local AI task orchestration SDK. Consumers (editor extensions, CLI tools, scri
 src/
 ├── sdk.ts             # Public entry point — all exports live here
 ├── engine.ts          # Event-loop pipeline engine
+├── pipeline-runner.ts # PipelineRunner class — multi-pipeline lifecycle management
+├── config-ops.ts      # Immutable CRUD helpers for RawPipelineConfig (visual editor)
+├── validate-raw.ts    # Raw config validation — structural + DAG, no runtime deps
 ├── dag.ts             # DAG construction & topological sort
 ├── runner.ts          # Task executor (Bun.spawn wrapper)
 ├── schema.ts          # YAML parsing, validation & template expansion

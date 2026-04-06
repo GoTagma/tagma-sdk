@@ -7,7 +7,7 @@ import type {
   OnFailure,
 } from './types';
 import { buildDag, type Dag, type DagNode } from './dag';
-import { getHandler, hasHandler } from './registry';
+import { getHandler, hasHandler, loadPlugins } from './registry';
 import { runSpawn, runCommand } from './runner';
 import { parseDuration, nowISO, generateRunId } from './utils';
 import {
@@ -127,6 +127,13 @@ export async function runPipeline(
 ): Promise<EngineResult> {
   const approvalGateway = options.approvalGateway ?? new InMemoryApprovalGateway();
   const maxLogRuns = options.maxLogRuns ?? 20;
+
+  // Load any plugins declared in the pipeline config before preflight so that
+  // drivers, completions, and middlewares referenced in YAML are registered.
+  if (config.plugins?.length) {
+    await loadPlugins(config.plugins);
+  }
+
   const dag = buildDag(config);
   const runId = generateRunId();
   preflight(config, dag);

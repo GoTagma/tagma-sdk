@@ -7,8 +7,30 @@
 export { runPipeline } from './engine';
 export type { EngineResult, RunPipelineOptions, PipelineEvent } from './engine';
 
+// ── Pipeline runner (multi-pipeline lifecycle management) ──
+export { PipelineRunner } from './pipeline-runner';
+export type { PipelineRunnerStatus } from './pipeline-runner';
+
+// ── Raw config CRUD (visual editor / YAML sync) ──
+export {
+  createEmptyPipeline,
+  setPipelineField,
+  upsertTrack,
+  removeTrack,
+  moveTrack,
+  updateTrack,
+  upsertTask,
+  removeTask,
+  moveTask,
+  transferTask,
+} from './config-ops';
+
+// ── Raw config validation (real-time feedback) ──
+export { validateRaw } from './validate-raw';
+export type { ValidationError } from './validate-raw';
+
 // ── Schema: parse / resolve / load / serialize / validate ──
-export { parseYaml, resolveConfig, expandTemplates, loadPipeline, serializePipeline, validateConfig } from './schema';
+export { parseYaml, resolveConfig, expandTemplates, loadPipeline, serializePipeline, deresolvePipeline, validateConfig } from './schema';
 
 // ── DAG ──
 export { buildDag } from './dag';
