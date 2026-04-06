@@ -291,7 +291,7 @@ export function deresolvePipeline(config: PipelineConfig, workDir: string): RawP
         ...(task.middlewares !== undefined ? { middlewares: task.middlewares } : {}),
         ...(task.completion ? { completion: task.completion } : {}),
         ...(task.agent_profile ? { agent_profile: task.agent_profile } : {}),
-        ...(task.permissions && JSON.stringify(task.permissions) !== JSON.stringify(DEFAULT_PERMISSIONS)
+        ...(task.permissions && JSON.stringify(task.permissions) !== JSON.stringify(track.permissions)
           ? { permissions: task.permissions }
           : {}),
       };

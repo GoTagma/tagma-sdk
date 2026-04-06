@@ -166,6 +166,10 @@ function detectCycles(
         const resolved = resolveDepRef(dep, track.id, allQualified, bareToQualified);
         if (resolved) deps.push(resolved);
       }
+      if (task.continue_from) {
+        const resolved = resolveDepRef(task.continue_from, track.id, allQualified, bareToQualified);
+        if (resolved && !deps.includes(resolved)) deps.push(resolved);
+      }
       adj.set(qid, deps);
     }
   }
