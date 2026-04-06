@@ -33,8 +33,8 @@ export type { ValidationError } from './validate-raw';
 export { parseYaml, resolveConfig, expandTemplates, loadPipeline, serializePipeline, deresolvePipeline, validateConfig } from './schema';
 
 // ── DAG ──
-export { buildDag } from './dag';
-export type { DagNode, Dag } from './dag';
+export { buildDag, buildRawDag } from './dag';
+export type { DagNode, Dag, RawDagNode, RawDag } from './dag';
 
 // ── Plugin registry ──
 export { bootstrapBuiltins } from './bootstrap';

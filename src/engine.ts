@@ -97,8 +97,8 @@ export interface EngineResult {
 // ═══ Pipeline Events ═══
 
 export type PipelineEvent =
-  | { readonly type: 'task_status_change'; readonly taskId: string; readonly status: TaskStatus; readonly prevStatus: TaskStatus; readonly runId: string }
-  | { readonly type: 'pipeline_start'; readonly runId: string }
+  | { readonly type: 'task_status_change'; readonly taskId: string; readonly status: TaskStatus; readonly prevStatus: TaskStatus; readonly runId: string; readonly state: TaskState }
+  | { readonly type: 'pipeline_start'; readonly runId: string; readonly states: ReadonlyMap<string, TaskState> }
   | { readonly type: 'pipeline_end'; readonly runId: string; readonly success: boolean };
 
 export interface RunPipelineOptions {
@@ -198,7 +198,11 @@ export async function runPipeline(
   for (const [, state] of states) {
     state.status = 'waiting';
   }
-  options.onEvent?.({ type: 'pipeline_start', runId });
+  // Include a full states snapshot so listeners can initialize their mirrors without missing events
+  const statesSnapshot: ReadonlyMap<string, TaskState> = new Map(
+    [...states.entries()].map(([id, s]) => [id, { ...s }])
+  );
+  options.onEvent?.({ type: 'pipeline_start', runId, states: statesSnapshot });
 
   const sessionMap = new Map<string, string>();
   const outputMap = new Map<string, string>();
@@ -246,7 +250,16 @@ export async function runPipeline(
     const state = states.get(taskId)!;
     const prevStatus = state.status;
     state.status = newStatus;
-    emit({ type: 'task_status_change', taskId, status: newStatus, prevStatus, runId });
+    // Snapshot state at emit time — result and finishedAt must be set before calling this for terminal statuses
+    const snapshot: TaskState = {
+      config: state.config,
+      trackConfig: state.trackConfig,
+      status: state.status,
+      result: state.result,
+      startedAt: state.startedAt,
+      finishedAt: state.finishedAt,
+    };
+    emit({ type: 'task_status_change', taskId, status: newStatus, prevStatus, runId, state: snapshot });
   }
 
   function getOnFailure(taskId: string): OnFailure {
@@ -319,8 +332,8 @@ export async function runPipeline(
       if (result === 'skip') {
         const depStatus = states.get(depId)?.status ?? 'unknown';
         log.debug(`[task:${taskId}]`, `skipped (upstream "${depId}" status=${depStatus})`);
-        setTaskStatus(taskId, 'skipped');
         state.finishedAt = nowISO();
+        setTaskStatus(taskId, 'skipped');
         return;
       }
       if (result === 'unsatisfied') return; // still waiting
@@ -343,6 +356,7 @@ export async function runPipeline(
         const msg = err instanceof Error ? err.message : String(err);
         // If pipeline was aborted while we were still waiting for the trigger,
         // this task never entered running state → skipped, not timeout.
+        state.finishedAt = nowISO();
         if (pipelineAborted) {
           setTaskStatus(taskId, 'skipped');
         } else if (msg.includes('rejected') || msg.includes('denied')) {
@@ -352,7 +366,6 @@ export async function runPipeline(
         } else {
           setTaskStatus(taskId, 'failed');        // plugin error, watcher crash, etc.
         }
-        state.finishedAt = nowISO();
         await fireHook(taskId, 'task_failure');
         return;
       }
@@ -366,8 +379,8 @@ export async function runPipeline(
         `task_start hook exit=${hookResult.exitCode} allowed=${hookResult.allowed}`);
     }
     if (!hookResult.allowed) {
-      setTaskStatus(taskId, 'blocked');
       state.finishedAt = nowISO();
+      setTaskStatus(taskId, 'blocked');
       await fireHook(taskId, 'task_failure');
       return;
     }
@@ -443,18 +456,19 @@ export async function runPipeline(
         result = await runSpawn(spec, driver, runOpts);
       }
 
-      // 5. Determine status
+      // 5. Determine terminal status (without emitting yet — result must be complete first)
+      let terminalStatus: TaskStatus;
       if (result.exitCode === -1) {
-        setTaskStatus(taskId, 'timeout');
+        terminalStatus = 'timeout';
       } else if (result.exitCode !== 0) {
-        setTaskStatus(taskId, 'failed');
+        terminalStatus = 'failed';
       } else if (task.completion) {
         const plugin = getHandler<CompletionPlugin>('completions', task.completion.type);
         const completionCtx = { workDir: task.cwd ?? workDir };
         const passed = await plugin.check(task.completion as Record<string, unknown>, result, completionCtx);
-        setTaskStatus(taskId, passed ? 'success' : 'failed');
+        terminalStatus = passed ? 'success' : 'failed';
       } else {
-        setTaskStatus(taskId, 'success');
+        terminalStatus = 'success';
       }
 
       // 6. Write output file with RAW stdout (preserves driver output format).
@@ -488,16 +502,18 @@ export async function runPipeline(
         if (!sessionMap.has(bareId)) sessionMap.set(bareId, result.sessionId);
       }
 
+      // Set result and finishedAt before emitting terminal status so listeners see complete state
       state.result = result;
       state.finishedAt = nowISO();
+      setTaskStatus(taskId, terminalStatus);
 
       // Log task outcome with relevant details
       const durSec = (result.durationMs / 1000).toFixed(1);
-      if (state.status === 'success') {
+      if (terminalStatus === 'success') {
         log.info(`[task:${taskId}]`, `success (${durSec}s)`);
       } else {
         log.error(`[task:${taskId}]`,
-          `${state.status} exit=${result.exitCode} duration=${durSec}s`);
+          `${terminalStatus} exit=${result.exitCode} duration=${durSec}s`);
         if (result.stderr) {
           const tail = tailLines(result.stderr, 10);
           log.error(`[task:${taskId}]`, `stderr tail:\n${tail}`);
@@ -524,12 +540,10 @@ export async function runPipeline(
       }
       if (task.completion) {
         log.debug(`[task:${taskId}]`,
-          `completion check: type=${task.completion.type} result=${state.status}`);
+          `completion check: type=${task.completion.type} result=${terminalStatus}`);
       }
 
     } catch (err: unknown) {
-      setTaskStatus(taskId, 'failed');
-      state.finishedAt = nowISO();
       const errMsg = err instanceof Error ? (err.stack ?? err.message) : String(err);
       log.error(`[task:${taskId}]`, `failed before execution: ${errMsg}`);
       state.result = {
@@ -539,6 +553,8 @@ export async function runPipeline(
         outputPath: null, stderrPath: null, durationMs: 0,
         sessionId: null, normalizedOutput: null,
       };
+      state.finishedAt = nowISO();
+      setTaskStatus(taskId, 'failed');
     }
 
     // 7. Fire hooks
@@ -589,8 +605,8 @@ export async function runPipeline(
       for (const [id, state] of states) {
         if (!isTerminal(state.status)) {
           // Running tasks get timeout (they were killed); waiting tasks get skipped
-          setTaskStatus(id, state.status === 'running' ? 'timeout' : 'skipped');
           state.finishedAt = nowISO();
+          setTaskStatus(id, state.status === 'running' ? 'timeout' : 'skipped');
         }
       }
     }

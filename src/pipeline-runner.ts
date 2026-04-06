@@ -42,6 +42,7 @@ export class PipelineRunner {
   private _abortController = new AbortController();
   private _handlers = new Set<(event: PipelineEvent) => void>();
   private _states: ReadonlyMap<string, TaskState> | null = null;
+  private _statesMirror = new Map<string, TaskState>();
 
   constructor(
     private readonly config: PipelineConfig,
@@ -67,6 +68,14 @@ export class PipelineRunner {
       onEvent: (event) => {
         if (event.type === 'pipeline_start') {
           this._runId = event.runId;
+          // Initialize the live mirror with the full initial state snapshot
+          for (const [id, state] of event.states) {
+            this._statesMirror.set(id, { ...state });
+          }
+        }
+        if (event.type === 'task_status_change') {
+          // Keep the mirror up to date so getStates() works during the run
+          this._statesMirror.set(event.taskId, event.state);
         }
         if (event.type === 'pipeline_end') {
           this._status = this._abortController.signal.aborted ? 'aborted' : 'done';
@@ -94,11 +103,14 @@ export class PipelineRunner {
   }
 
   /**
-   * Snapshot of task states. Populated after the run completes.
-   * During a run, listen to subscribe() events for incremental updates.
+   * Live snapshot of task states. Available from the first pipeline_start event onward
+   * (i.e. as soon as start() is called) and remains accessible after the run completes.
+   * Returns null only if the pipeline has never started.
    */
   getStates(): ReadonlyMap<string, TaskState> | null {
-    return this._states;
+    if (this._states) return this._states;
+    if (this._statesMirror.size > 0) return this._statesMirror;
+    return null;
   }
 
   /**

@@ -117,19 +117,56 @@ export function upsertTask(
 
 /**
  * Remove a task from a track. No-op if either id is not found.
+ *
+ * When `cleanRefs` is true, all `depends_on` and `continue_from` references to the
+ * removed task are also removed from every other task in the pipeline. This prevents
+ * validateRaw from reporting dangling-ref errors after the deletion.
  */
 export function removeTask(
   config: RawPipelineConfig,
   trackId: string,
   taskId: string,
+  cleanRefs = false,
 ): RawPipelineConfig {
-  return {
+  const withoutTask = {
     ...config,
     tracks: config.tracks.map(t => {
       if (t.id !== trackId) return t;
       return { ...t, tasks: t.tasks.filter(tk => tk.id !== taskId) };
     }),
   };
+
+  if (!cleanRefs) return withoutTask;
+
+  // Both bare ("taskId") and fully-qualified ("trackId.taskId") forms are valid refs
+  const qualId = `${trackId}.${taskId}`;
+  const isRemoved = (ref: string) => ref === taskId || ref === qualId;
+
+  return {
+    ...withoutTask,
+    tracks: withoutTask.tracks.map(t => ({
+      ...t,
+      tasks: t.tasks.map(tk => cleanTaskRefs(tk, isRemoved)),
+    })),
+  };
+}
+
+function cleanTaskRefs(
+  task: RawTaskConfig,
+  isRemoved: (ref: string) => boolean,
+): RawTaskConfig {
+  const filteredDeps = task.depends_on?.filter(d => !isRemoved(d));
+  const dropContinueFrom = task.continue_from !== undefined && isRemoved(task.continue_from);
+
+  const depsUnchanged = filteredDeps === undefined || filteredDeps.length === task.depends_on!.length;
+  if (depsUnchanged && !dropContinueFrom) return task;
+
+  const { depends_on, continue_from, ...rest } = task;
+  return {
+    ...rest,
+    ...(filteredDeps !== undefined && filteredDeps.length > 0 ? { depends_on: filteredDeps } : {}),
+    ...(!dropContinueFrom && continue_from !== undefined ? { continue_from } : {}),
+  } as RawTaskConfig;
 }
 
 /**

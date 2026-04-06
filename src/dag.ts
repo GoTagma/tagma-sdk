@@ -1,4 +1,4 @@
-import type { PipelineConfig, TaskConfig, TrackConfig } from './types';
+import type { PipelineConfig, RawPipelineConfig, RawTaskConfig, TaskConfig, TrackConfig } from './types';
 
 export interface DagNode {
   readonly taskId: string;   // fully qualified: track_id.task_id or just task_id
@@ -134,4 +134,89 @@ export function buildDag(config: PipelineConfig): Dag {
   }
 
   return { nodes, sorted };
+}
+
+// ═══ Raw DAG (for visual editor — no workDir required) ═══
+
+export interface RawDagNode {
+  readonly taskId: string;        // fully qualified: track_id.task_id
+  readonly trackId: string;
+  readonly rawTask: RawTaskConfig;
+  readonly dependsOn: readonly string[];  // fully qualified IDs, best-effort resolved
+}
+
+export interface RawDag {
+  readonly nodes: ReadonlyMap<string, RawDagNode>;
+  /** Directed edges: from → to means "from must complete before to starts" */
+  readonly edges: readonly { readonly from: string; readonly to: string }[];
+}
+
+/**
+ * Build a lightweight DAG from a raw (unresolved) pipeline config.
+ * Unlike buildDag, this function:
+ *   - Does not require a workDir or resolved PipelineConfig
+ *   - Is lenient: missing or ambiguous refs are silently skipped
+ *   - Skips template-expansion tasks (those with a `use` field)
+ *
+ * Intended for the visual editor to render the flow graph before a pipeline is run.
+ */
+export function buildRawDag(config: RawPipelineConfig): RawDag {
+  const nodes = new Map<string, RawDagNode>();
+  const bareToQualified = new Map<string, string>();
+
+  // 1. Register all concrete tasks
+  for (const track of config.tracks) {
+    for (const task of track.tasks) {
+      if (task.use) continue; // template-expansion tasks are not yet materialized
+      const qid = `${track.id}.${task.id}`;
+      if (nodes.has(qid)) continue; // skip duplicates silently
+
+      if (bareToQualified.has(task.id)) {
+        bareToQualified.set(task.id, '__ambiguous__');
+      } else {
+        bareToQualified.set(task.id, qid);
+      }
+      nodes.set(qid, { taskId: qid, trackId: track.id, rawTask: task, dependsOn: [] });
+    }
+  }
+
+  // 2. Resolve dependency refs leniently (missing / ambiguous refs are skipped)
+  function tryResolve(ref: string, fromTrackId: string): string | null {
+    if (ref.includes('.')) return nodes.has(ref) ? ref : null;
+    const sameTrack = `${fromTrackId}.${ref}`;
+    if (nodes.has(sameTrack)) return sameTrack;
+    const global = bareToQualified.get(ref);
+    if (global && global !== '__ambiguous__') return global;
+    return null;
+  }
+
+  const edges: { from: string; to: string }[] = [];
+
+  for (const track of config.tracks) {
+    for (const task of track.tasks) {
+      if (task.use) continue;
+      const qid = `${track.id}.${task.id}`;
+      const deps: string[] = [];
+
+      for (const ref of task.depends_on ?? []) {
+        const resolved = tryResolve(ref, track.id);
+        if (resolved && !deps.includes(resolved)) {
+          deps.push(resolved);
+          edges.push({ from: resolved, to: qid });
+        }
+      }
+      if (task.continue_from) {
+        const resolved = tryResolve(task.continue_from, track.id);
+        if (resolved && !deps.includes(resolved)) {
+          deps.push(resolved);
+          edges.push({ from: resolved, to: qid });
+        }
+      }
+
+      const node = nodes.get(qid)!;
+      nodes.set(qid, { ...node, dependsOn: deps });
+    }
+  }
+
+  return { nodes, edges };
 }

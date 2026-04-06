@@ -113,7 +113,10 @@ Executes the pipeline. Returns `{ success, runId, logPath, summary, states }`.
 Options:
 - `approvalGateway` -- custom `ApprovalGateway` instance (defaults to `InMemoryApprovalGateway`)
 - `signal` -- `AbortSignal` to cancel the run externally
-- `onEvent` -- callback for real-time `PipelineEvent` updates (task status changes, pipeline start/end)
+- `onEvent` -- callback for real-time `PipelineEvent` updates:
+  - `pipeline_start` — pipeline began; includes `states: ReadonlyMap<taskId, TaskState>` (initial snapshot of all tasks at `waiting`)
+  - `task_status_change` — a task changed status; includes `state: TaskState` (complete snapshot at the time of change, with `result` and `finishedAt` already populated for terminal statuses)
+  - `pipeline_end` — pipeline finished; includes `success: boolean`
 - `maxLogRuns` -- number of per-run log directories to keep under `<workDir>/logs/` (default: 20)
 
 ### `PipelineRunner`
@@ -133,8 +136,9 @@ runner.start(); // returns Promise<EngineResult>, idempotent
 // Cancel from IPC
 runner.abort();
 
-// After completion
-const states = runner.getStates(); // ReadonlyMap<taskId, TaskState>
+// Available from the first pipeline_start event onward (not just after completion)
+// Returns null only if the pipeline has never started
+const states = runner.getStates(); // ReadonlyMap<taskId, TaskState> | null
 ```
 
 Properties:
@@ -184,7 +188,7 @@ const yaml = serializePipeline(config);
 | `moveTrack(config, trackId, toIndex)` | Reorder a track |
 | `updateTrack(config, trackId, fields)` | Patch track fields (not tasks) |
 | `upsertTask(config, trackId, task)` | Insert or replace a task |
-| `removeTask(config, trackId, taskId)` | Remove a task |
+| `removeTask(config, trackId, taskId, cleanRefs?)` | Remove a task; pass `cleanRefs: true` to also strip dangling `depends_on` / `continue_from` references from other tasks |
 | `moveTask(config, trackId, taskId, toIndex)` | Reorder a task within its track |
 | `transferTask(config, fromTrackId, taskId, toTrackId)` | Move a task across tracks |
 
@@ -230,6 +234,20 @@ if (errors.length > 0) {
   errors.forEach(e => highlightNode(e.path, e.message));
 }
 ```
+
+### `buildRawDag(config: RawPipelineConfig): RawDag`
+
+Extracts the topology of a raw (unresolved) pipeline config as a graph — no `workDir` or plugin registration required. Intended for the visual editor to render the flow graph during editing.
+
+Returns `{ nodes: ReadonlyMap<taskId, RawDagNode>, edges: { from, to }[] }` where each edge represents a dependency (from must complete before to). Template-expansion tasks (`use:` field) and unresolvable refs are silently skipped.
+
+```ts
+const { nodes, edges } = buildRawDag(draftConfig);
+// nodes — keyed by "trackId.taskId"
+// edges — [{ from: "track.taskA", to: "track.taskB" }, ...]
+```
+
+Use `buildDag` instead when you have a fully resolved `PipelineConfig` and need topological sort order.
 
 ## Related Packages
 
