@@ -1,0 +1,260 @@
+import yaml from 'js-yaml';
+import { resolve } from 'path';
+import type {
+  PipelineConfig, RawPipelineConfig, RawTrackConfig, RawTaskConfig,
+  TrackConfig, TaskConfig, Permissions, MiddlewareConfig,
+  TemplateConfig, TemplateParamDef,
+} from './types';
+import { truncateForName, validatePathParam } from './utils';
+import { DEFAULT_PERMISSIONS } from './types';
+
+// ═══ YAML Parsing ═══
+
+export function parseYaml(content: string): RawPipelineConfig {
+  const doc = yaml.load(content) as { pipeline?: RawPipelineConfig };
+  if (!doc?.pipeline) {
+    throw new Error('YAML must contain a top-level "pipeline" key');
+  }
+  const p = doc.pipeline;
+  if (!p.name) throw new Error('pipeline.name is required');
+  if (!p.tracks || p.tracks.length === 0) throw new Error('pipeline.tracks must be non-empty');
+
+  for (const track of p.tracks) {
+    validateRawTrack(track);
+  }
+  return p;
+}
+
+function validateRawTrack(track: RawTrackConfig): void {
+  if (!track.id) throw new Error('track.id is required');
+  if (!track.name) throw new Error(`track "${track.id}": name is required`);
+  if (!track.tasks || track.tasks.length === 0) {
+    throw new Error(`track "${track.id}": tasks must be non-empty`);
+  }
+  for (const task of track.tasks) {
+    validateRawTask(task, track.id);
+  }
+}
+
+function validateRawTask(task: RawTaskConfig, trackId: string): void {
+  if (!task.id) throw new Error(`track "${trackId}": task.id is required`);
+  if (task.use) return; // template usage, validated later
+
+  const hasPrompt = typeof task.prompt === 'string' && task.prompt.length > 0;
+  const hasCommand = typeof task.command === 'string' && task.command.length > 0;
+  if (!hasPrompt && !hasCommand) {
+    throw new Error(`task "${task.id}": must have either "prompt" or "command"`);
+  }
+  if (hasPrompt && hasCommand) {
+    throw new Error(`task "${task.id}": cannot have both "prompt" and "command"`);
+  }
+}
+
+// ═══ Template Expansion ═══
+
+export async function expandTemplates(
+  tasks: readonly RawTaskConfig[],
+  instancePrefix: string,
+): Promise<RawTaskConfig[]> {
+  const result: RawTaskConfig[] = [];
+
+  for (const task of tasks) {
+    if (!task.use) {
+      result.push(task);
+      continue;
+    }
+
+    const template = await loadTemplate(task.use);
+    const params = resolveTemplateParams(template, task.with ?? {}, task.id);
+    const expanded = expandTemplateTask(template, params, task.id, instancePrefix);
+    result.push(...expanded);
+  }
+
+  return result;
+}
+
+async function loadTemplate(ref: string): Promise<TemplateConfig> {
+  // Strip version suffix for import
+  const moduleName = ref.replace(/@v\d+$/, '');
+  try {
+    const mod = await import(moduleName);
+    // Expect the module to export a template.yaml content or parsed object
+    if (mod.template) return mod.template as TemplateConfig;
+
+    // Try loading template.yaml from the package
+    const pkgPath = require.resolve(`${moduleName}/template.yaml`);
+    const content = await Bun.file(pkgPath).text();
+    const doc = yaml.load(content) as { template: TemplateConfig };
+    return doc.template;
+  } catch {
+    throw new Error(`Failed to load template: "${ref}". Is the package installed?`);
+  }
+}
+
+function resolveTemplateParams(
+  template: TemplateConfig,
+  provided: Record<string, unknown>,
+  instanceId: string,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  const defs = template.params ?? {};
+
+  for (const [key, def] of Object.entries(defs)) {
+    const value = provided[key] ?? def.default;
+    if (value === undefined) {
+      throw new Error(`Template "${template.name}" instance "${instanceId}": missing required param "${key}"`);
+    }
+    validateParamType(key, value, def, template.name, instanceId);
+    params[key] = value;
+  }
+
+  // Warn about unknown params
+  for (const key of Object.keys(provided)) {
+    if (!(key in defs)) {
+      console.warn(`Template "${template.name}" instance "${instanceId}": unknown param "${key}"`);
+    }
+  }
+
+  return params;
+}
+
+function validateParamType(
+  key: string, value: unknown, def: TemplateParamDef,
+  templateName: string, instanceId: string,
+): void {
+  const ctx = `Template "${templateName}" instance "${instanceId}" param "${key}"`;
+  const ptype = def.type ?? 'string';
+
+  switch (ptype) {
+    case 'string':
+      if (typeof value !== 'string') throw new Error(`${ctx}: expected string, got ${typeof value}`);
+      break;
+    case 'path':
+      if (typeof value !== 'string') throw new Error(`${ctx}: expected path string, got ${typeof value}`);
+      validatePathParam(value);
+      break;
+    case 'enum':
+      if (!def.enum?.includes(value as string)) {
+        throw new Error(`${ctx}: value "${value}" not in allowed values [${def.enum?.join(', ')}]`);
+      }
+      break;
+    case 'number':
+      if (typeof value !== 'number') throw new Error(`${ctx}: expected number, got ${typeof value}`);
+      if (def.min !== undefined && value < def.min) throw new Error(`${ctx}: ${value} < min ${def.min}`);
+      if (def.max !== undefined && value > def.max) throw new Error(`${ctx}: ${value} > max ${def.max}`);
+      break;
+  }
+}
+
+function expandTemplateTask(
+  template: TemplateConfig,
+  params: Record<string, unknown>,
+  instanceId: string,
+  instancePrefix: string,
+): RawTaskConfig[] {
+  return template.tasks.map(task => {
+    const prefixedId = `${instanceId}.${task.id}`;
+
+    // Replace ${{ params.xxx }} in string fields
+    const interpolate = (s: string): string =>
+      s.replace(/\$\{\{\s*params\.(\w+)\s*\}\}/g, (_, key) => String(params[key] ?? ''));
+
+    const newTask: Record<string, unknown> = { ...task, id: prefixedId };
+
+    // Interpolate string fields
+    if (task.prompt) newTask.prompt = interpolate(task.prompt);
+    if (task.command) newTask.command = interpolate(task.command);
+
+    // Namespace depends_on
+    if (task.depends_on) {
+      newTask.depends_on = task.depends_on.map(dep => `${instanceId}.${dep}`);
+    }
+
+    // Namespace continue_from
+    if (task.continue_from) {
+      newTask.continue_from = `${instanceId}.${task.continue_from}`;
+    }
+
+    // Rewrite output path to instance namespace
+    if (task.output) {
+      const original = interpolate(task.output);
+      newTask.output = original.replace('./tmp/', `./tmp/${instanceId}/`);
+    }
+
+    return newTask as unknown as RawTaskConfig;
+  });
+}
+
+// ═══ Config Inheritance Resolution ═══
+
+export function resolveConfig(raw: RawPipelineConfig, workDir: string): PipelineConfig {
+  const tracks: TrackConfig[] = raw.tracks.map(rawTrack => {
+    const trackDriver = rawTrack.driver ?? raw.driver;
+    const trackCwd = rawTrack.cwd ? resolve(workDir, rawTrack.cwd) : workDir;
+
+    const tasks: TaskConfig[] = rawTrack.tasks.map(rawTask => {
+      const name = rawTask.name
+        ?? (rawTask.prompt ? truncateForName(rawTask.prompt) : rawTask.command ?? rawTask.id);
+
+      return {
+        id: rawTask.id,
+        name,
+        prompt: rawTask.prompt,
+        command: rawTask.command,
+        depends_on: rawTask.depends_on,
+        trigger: rawTask.trigger,
+        continue_from: rawTask.continue_from,
+        output: rawTask.output,
+        // Inheritance: Task > Track
+        model_tier: rawTask.model_tier ?? rawTrack.model_tier ?? 'medium',
+        permissions: rawTask.permissions ?? rawTrack.permissions ?? DEFAULT_PERMISSIONS,
+        driver: rawTask.driver ?? trackDriver ?? 'claude-code',
+        timeout: rawTask.timeout,
+        // Middleware: Task-level overrides Track (including [] to disable)
+        middlewares: rawTask.middlewares !== undefined ? rawTask.middlewares : rawTrack.middlewares,
+        completion: rawTask.completion,
+        agent_profile: rawTask.agent_profile ?? rawTrack.agent_profile,
+        cwd: rawTask.cwd ? resolve(workDir, rawTask.cwd) : trackCwd,
+      };
+    });
+
+    return {
+      id: rawTrack.id,
+      name: rawTrack.name,
+      color: rawTrack.color,
+      agent_profile: rawTrack.agent_profile,
+      model_tier: rawTrack.model_tier ?? 'medium',
+      permissions: rawTrack.permissions ?? DEFAULT_PERMISSIONS,
+      driver: trackDriver ?? 'claude-code',
+      cwd: trackCwd,
+      middlewares: rawTrack.middlewares,
+      on_failure: rawTrack.on_failure ?? 'skip_downstream',
+      tasks,
+    };
+  });
+
+  return {
+    name: raw.name,
+    driver: raw.driver,
+    timeout: raw.timeout,
+    plugins: raw.plugins,
+    hooks: raw.hooks,
+    tracks,
+  };
+}
+
+// ═══ Full Parse Pipeline ═══
+
+export async function loadPipeline(yamlContent: string, workDir: string): Promise<PipelineConfig> {
+  const raw = parseYaml(yamlContent);
+
+  // Expand templates in each track
+  const expandedTracks: RawTrackConfig[] = [];
+  for (const track of raw.tracks) {
+    const expandedTasks = await expandTemplates(track.tasks, track.id);
+    expandedTracks.push({ ...track, tasks: expandedTasks });
+  }
+
+  const expandedRaw: RawPipelineConfig = { ...raw, tracks: expandedTracks };
+  return resolveConfig(expandedRaw, workDir);
+}

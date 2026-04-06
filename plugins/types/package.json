@@ -1,0 +1,11 @@
+{
+  "name": "@tagma-sdk/types",
+  "version": "0.1.0",
+  "description": "Shared type surface for Track & Task engine and plugins — types only, no runtime code",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": ["src"]
+}
