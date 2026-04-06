@@ -38,8 +38,11 @@ export type { WebSocketApprovalAdapter, WebSocketApprovalAdapterOptions } from '
 // ── Logger ──
 export { Logger, tailLines, clip } from './logger';
 
+// ── Hook context types (useful for frontend display) ──
+export type { HookResult, PipelineInfo, TrackInfo, TaskInfo } from './hooks';
+
 // ── Utils (public subset) ──
-export { parseDuration, validatePath, generateRunId, nowISO } from './utils';
+export { parseDuration, validatePath, generateRunId, nowISO, truncateForName } from './utils';
 
 // ── All types from @tagma-sdk/types + runtime constants ──
 export * from './types';
