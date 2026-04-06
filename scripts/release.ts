@@ -155,6 +155,9 @@ for (const { pkg, newVersion } of updates) {
   console.log(`  ${pkg.name}: ${pkg.version} → ${newVersion}`);
 }
 
+// Save original versions for rollback
+const originalVersions = new Map(updates.map(({ pkg }) => [pkg.pkgPath, pkg.version]));
+
 // Write versions
 for (const { pkg, newVersion } of updates) {
   const json = readJson(pkg.pkgPath);
@@ -174,10 +177,36 @@ execSync("bun install", { cwd: ROOT, stdio: "inherit" });
 
 // Publish
 console.log("\n--- Publishing ---");
+const published: string[] = [];
 for (const { pkg, newVersion } of updates) {
   console.log(`\nPublishing ${pkg.name}@${newVersion}...`);
-  execSync(`cd "${pkg.dir}" && bun publish --access public`, { stdio: "inherit" });
-  console.log(`✓ ${pkg.name}@${newVersion} published`);
+  try {
+    execSync(`cd "${pkg.dir}" && bun publish --access public`, { stdio: "inherit" });
+    console.log(`✓ ${pkg.name}@${newVersion} published`);
+    published.push(pkg.pkgPath);
+  } catch (err) {
+    console.error(`\n✗ Failed to publish ${pkg.name}@${newVersion}`);
+    // Roll back versions for packages that were NOT successfully published
+    const unpublished = updates.filter(({ pkg: p }) => !published.includes(p.pkgPath));
+    if (unpublished.length > 0) {
+      console.error("\nRolling back version bumps for unpublished packages:");
+      for (const { pkg: p } of unpublished) {
+        const original = originalVersions.get(p.pkgPath)!;
+        const json = readJson(p.pkgPath);
+        json.version = original;
+        writeJson(p.pkgPath, json);
+        console.error(`  ↩ ${p.name}: reverted to ${original}`);
+      }
+    }
+    if (published.length > 0) {
+      console.error("\nAlready published (cannot revert):");
+      for (const pkgPath of published) {
+        const u = updates.find(({ pkg: p }) => p.pkgPath === pkgPath)!;
+        console.error(`  • ${u.pkg.name}@${u.newVersion}`);
+      }
+    }
+    process.exit(1);
+  }
 }
 
 console.log("\nAll done 🎉");
