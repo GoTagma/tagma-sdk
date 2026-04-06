@@ -1,6 +1,6 @@
 # @tagma/driver-opencode
 
-[OpenCode](https://github.com/opencode-ai/opencode) driver plugin for [@tagma/sdk](https://www.npmjs.com/package/@tagma/sdk).
+[OpenCode](https://github.com/anomalyco/opencode) driver plugin for [@tagma/sdk](https://www.npmjs.com/package/@tagma/sdk).
 
 Translates pipeline tasks into `opencode run` invocations with JSON output parsing.
 
