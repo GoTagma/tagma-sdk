@@ -113,7 +113,7 @@ export function attachWebSocketApprovalAdapter(
   });
 
   return {
-    port: server.port,
+    port: server.port!,
     detach() {
       unsubscribe();
       clients.clear();

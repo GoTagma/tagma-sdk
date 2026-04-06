@@ -1,5 +1,5 @@
 import { resolve, dirname } from 'path';
-import { mkdir } from 'fs/promises';
+import { mkdir, readdir, rm } from 'fs/promises';
 import type {
   PipelineConfig, TaskConfig, TrackConfig, TaskState, TaskStatus,
   TaskResult, DriverPlugin, TriggerPlugin, CompletionPlugin,
@@ -85,6 +85,8 @@ function resolveRefInDag(dag: Dag, ref: string, fromTrackId: string): string | n
 
 export interface EngineResult {
   readonly success: boolean;
+  readonly runId: string;
+  readonly logPath: string;
   readonly summary: {
     total: number; success: number; failed: number;
     skipped: number; timeout: number; blocked: number;
@@ -94,6 +96,11 @@ export interface EngineResult {
 
 export interface RunPipelineOptions {
   readonly approvalGateway?: ApprovalGateway;
+  /**
+   * Maximum number of per-run log directories to retain under `<workDir>/logs/`.
+   * Oldest directories are deleted after each run. Defaults to 20. Set to 0 to disable cleanup.
+   */
+  readonly maxLogRuns?: number;
 }
 
 export async function runPipeline(
@@ -102,6 +109,7 @@ export async function runPipeline(
   options: RunPipelineOptions = {},
 ): Promise<EngineResult> {
   const approvalGateway = options.approvalGateway ?? new InMemoryApprovalGateway();
+  const maxLogRuns = options.maxLogRuns ?? 20;
   const dag = buildDag(config);
   preflight(config, dag);
 
@@ -153,6 +161,8 @@ export async function runPipeline(
     // All tasks stay idle — pipeline never started
     return {
       success: false,
+      runId,
+      logPath: log.path,
       summary: { total: dag.nodes.size, success: 0, failed: 0, skipped: 0, timeout: 0, blocked: 0 },
       states,
     };
@@ -417,9 +427,7 @@ export async function runPipeline(
       }
 
       if (result.stderr) {
-        const stderrDir = resolve(workDir, './tmp', runId);
-        await mkdir(stderrDir, { recursive: true });
-        const stderrPath = resolve(stderrDir, `${taskId.replace(/\./g, '_')}.stderr`);
+        const stderrPath = resolve(log.dir, `${taskId.replace(/\./g, '_')}.stderr`);
         await Bun.write(stderrPath, result.stderr);
         result = { ...result, stderrPath };
       }
@@ -589,7 +597,38 @@ export async function runPipeline(
   console.log(`  Duration: ${(durationMs / 1000).toFixed(1)}s`);
   console.log(`  Log: ${log.path}`);
 
-  return { success: allSuccess, summary, states };
+  // Prune old per-run log directories, keeping only the most recent maxLogRuns.
+  if (maxLogRuns > 0) {
+    await pruneLogDirs(resolve(workDir, 'logs'), maxLogRuns);
+  }
+
+  return { success: allSuccess, runId, logPath: log.path, summary, states };
+}
+
+/**
+ * Delete the oldest subdirectories under `logsDir`, keeping only the most recent `keep`.
+ * Directories are sorted lexicographically; because runIds are prefixed with a base-36
+ * timestamp, lexicographic order equals chronological order.
+ */
+async function pruneLogDirs(logsDir: string, keep: number): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(logsDir);
+  } catch {
+    return; // logsDir doesn't exist yet — nothing to prune
+  }
+
+  // Only consider directories that look like run IDs (run_<...>)
+  const runDirs = entries.filter(e => e.startsWith('run_')).sort();
+  const toDelete = runDirs.slice(0, Math.max(0, runDirs.length - keep));
+
+  await Promise.all(
+    toDelete.map(dir =>
+      rm(resolve(logsDir, dir), { recursive: true, force: true }).catch(() => {
+        // Ignore deletion errors — stale dirs are better than a crash
+      })
+    )
+  );
 }
 
 function isTerminal(status: TaskStatus): boolean {

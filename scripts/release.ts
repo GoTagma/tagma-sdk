@@ -176,7 +176,7 @@ execSync("bun install", { cwd: ROOT, stdio: "inherit" });
 console.log("\n--- Publishing ---");
 for (const { pkg, newVersion } of updates) {
   console.log(`\nPublishing ${pkg.name}@${newVersion}...`);
-  execSync(`cd "${pkg.dir}" && bun publish --access public`, { stdio: "inherit" });
+  execSync(`cd "${pkg.dir}" && npm publish --access public`, { stdio: "inherit" });
   console.log(`✓ ${pkg.name}@${newVersion} published`);
 }
 

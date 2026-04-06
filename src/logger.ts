@@ -14,9 +14,11 @@ import { mkdirSync, appendFileSync, writeFileSync } from 'node:fs';
  */
 export class Logger {
   private readonly filePath: string;
+  private readonly runDir: string;
 
   constructor(workDir: string, runId: string) {
-    this.filePath = resolve(workDir, 'tmp', 'pipeline.log');
+    this.runDir = resolve(workDir, 'logs', runId);
+    this.filePath = resolve(this.runDir, 'pipeline.log');
     mkdirSync(dirname(this.filePath), { recursive: true });
     writeFileSync(
       this.filePath,
@@ -69,6 +71,11 @@ export class Logger {
 
   get path(): string {
     return this.filePath;
+  }
+
+  /** Directory that holds all artifacts for this run (pipeline.log, *.stderr, etc.). */
+  get dir(): string {
+    return this.runDir;
   }
 }
 
