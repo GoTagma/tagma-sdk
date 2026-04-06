@@ -7,6 +7,7 @@ import type {
 } from './types';
 import { truncateForName, validatePathParam } from './utils';
 import { DEFAULT_PERMISSIONS } from './types';
+import { buildDag } from './dag';
 
 // ═══ YAML Parsing ═══
 
@@ -241,6 +242,33 @@ export function resolveConfig(raw: RawPipelineConfig, workDir: string): Pipeline
     hooks: raw.hooks,
     tracks,
   };
+}
+
+// ═══ YAML Serialization ═══
+
+/**
+ * Serialize a pipeline config back to YAML string.
+ * Wraps the config under the top-level `pipeline` key as expected by parseYaml.
+ */
+export function serializePipeline(config: PipelineConfig | RawPipelineConfig): string {
+  return yaml.dump({ pipeline: config }, { lineWidth: 120, indent: 2 });
+}
+
+// ═══ Offline Validation ═══
+
+/**
+ * Validate a pipeline config without executing it.
+ * Only checks structural/DAG correctness — does not check plugin registration.
+ * Returns an array of error messages (empty = valid).
+ */
+export function validateConfig(config: PipelineConfig): string[] {
+  const errors: string[] = [];
+  try {
+    buildDag(config);
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : String(err));
+  }
+  return errors;
 }
 
 // ═══ Full Parse Pipeline ═══

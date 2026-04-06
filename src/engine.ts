@@ -94,6 +94,13 @@ export interface EngineResult {
   readonly states: ReadonlyMap<string, TaskState>;
 }
 
+// ═══ Pipeline Events ═══
+
+export type PipelineEvent =
+  | { readonly type: 'task_status_change'; readonly taskId: string; readonly status: TaskStatus; readonly prevStatus: TaskStatus; readonly runId: string }
+  | { readonly type: 'pipeline_start'; readonly runId: string }
+  | { readonly type: 'pipeline_end'; readonly runId: string; readonly success: boolean };
+
 export interface RunPipelineOptions {
   readonly approvalGateway?: ApprovalGateway;
   /**
@@ -101,6 +108,16 @@ export interface RunPipelineOptions {
    * Oldest directories are deleted after each run. Defaults to 20. Set to 0 to disable cleanup.
    */
   readonly maxLogRuns?: number;
+  /**
+   * External AbortSignal — aborting it cancels the pipeline immediately.
+   * Equivalent to the pipeline timeout firing, but caller-controlled.
+   */
+  readonly signal?: AbortSignal;
+  /**
+   * Called on every pipeline/task status transition.
+   * Use for real-time UI updates (e.g. updating a visual workflow graph).
+   */
+  readonly onEvent?: (event: PipelineEvent) => void;
 }
 
 export async function runPipeline(
@@ -111,9 +128,9 @@ export async function runPipeline(
   const approvalGateway = options.approvalGateway ?? new InMemoryApprovalGateway();
   const maxLogRuns = options.maxLogRuns ?? 20;
   const dag = buildDag(config);
+  const runId = generateRunId();
   preflight(config, dag);
 
-  const runId = generateRunId();
   const startedAt = nowISO();
   const pipelineInfo: PipelineInfo = { name: config.name, run_id: runId, started_at: startedAt };
   const log = new Logger(workDir, runId);
@@ -150,6 +167,8 @@ export async function runPipeline(
     });
   }
 
+  try {
+
   // Pipeline start hook (gate)
   const startHook = await executeHook(
     config.hooks, 'pipeline_start', buildPipelineStartContext(pipelineInfo), workDir,
@@ -172,6 +191,7 @@ export async function runPipeline(
   for (const [, state] of states) {
     state.status = 'waiting';
   }
+  options.onEvent?.({ type: 'pipeline_start', runId });
 
   const sessionMap = new Map<string, string>();
   const outputMap = new Map<string, string>();
@@ -196,7 +216,31 @@ export async function runPipeline(
     approvalGateway.abortAll('pipeline aborted');
   });
 
+  // Wire external cancel signal into the internal abort controller.
+  if (options.signal) {
+    if (options.signal.aborted) {
+      pipelineAborted = true;
+      abortController.abort();
+    } else {
+      options.signal.addEventListener('abort', () => {
+        pipelineAborted = true;
+        abortController.abort();
+      }, { once: true });
+    }
+  }
+
   // ── Helpers ──
+
+  function emit(event: PipelineEvent): void {
+    options.onEvent?.(event);
+  }
+
+  function setTaskStatus(taskId: string, newStatus: TaskStatus): void {
+    const state = states.get(taskId)!;
+    const prevStatus = state.status;
+    state.status = newStatus;
+    emit({ type: 'task_status_change', taskId, status: newStatus, prevStatus, runId });
+  }
 
   function getOnFailure(taskId: string): OnFailure {
     return dag.nodes.get(taskId)?.track.on_failure ?? 'skip_downstream';
@@ -215,10 +259,9 @@ export async function runPipeline(
   }
 
   function applyStopAll(trackId: string): void {
-    for (const [, state] of states) {
-      const node = dag.nodes.get(state.config.id);
+    for (const [id, state] of states) {
       if (state.trackConfig.id === trackId && !isTerminal(state.status)) {
-        state.status = 'skipped';
+        setTaskStatus(id, 'skipped');
         state.finishedAt = nowISO();
       }
     }
@@ -269,7 +312,7 @@ export async function runPipeline(
       if (result === 'skip') {
         const depStatus = states.get(depId)?.status ?? 'unknown';
         log.debug(`[task:${taskId}]`, `skipped (upstream "${depId}" status=${depStatus})`);
-        state.status = 'skipped';
+        setTaskStatus(taskId, 'skipped');
         state.finishedAt = nowISO();
         return;
       }
@@ -294,13 +337,13 @@ export async function runPipeline(
         // If pipeline was aborted while we were still waiting for the trigger,
         // this task never entered running state → skipped, not timeout.
         if (pipelineAborted) {
-          state.status = 'skipped';
+          setTaskStatus(taskId, 'skipped');
         } else if (msg.includes('rejected') || msg.includes('denied')) {
-          state.status = 'blocked';       // user/policy rejection
+          setTaskStatus(taskId, 'blocked');       // user/policy rejection
         } else if (msg.includes('timeout')) {
-          state.status = 'timeout';       // genuine trigger wait timeout
+          setTaskStatus(taskId, 'timeout');       // genuine trigger wait timeout
         } else {
-          state.status = 'failed';        // plugin error, watcher crash, etc.
+          setTaskStatus(taskId, 'failed');        // plugin error, watcher crash, etc.
         }
         state.finishedAt = nowISO();
         await fireHook(taskId, 'task_failure');
@@ -316,14 +359,14 @@ export async function runPipeline(
         `task_start hook exit=${hookResult.exitCode} allowed=${hookResult.allowed}`);
     }
     if (!hookResult.allowed) {
-      state.status = 'blocked';
+      setTaskStatus(taskId, 'blocked');
       state.finishedAt = nowISO();
       await fireHook(taskId, 'task_failure');
       return;
     }
 
     // 4. Mark running
-    state.status = 'running';
+    setTaskStatus(taskId, 'running');
     state.startedAt = nowISO();
     log.info(`[task:${taskId}]`, task.command ? `running: ${task.command}` : `running (driver task)`);
 
@@ -395,16 +438,16 @@ export async function runPipeline(
 
       // 5. Determine status
       if (result.exitCode === -1) {
-        state.status = 'timeout';
+        setTaskStatus(taskId, 'timeout');
       } else if (result.exitCode !== 0) {
-        state.status = 'failed';
+        setTaskStatus(taskId, 'failed');
       } else if (task.completion) {
         const plugin = getHandler<CompletionPlugin>('completions', task.completion.type);
         const completionCtx = { workDir: task.cwd ?? workDir };
         const passed = await plugin.check(task.completion as Record<string, unknown>, result, completionCtx);
-        state.status = passed ? 'success' : 'failed';
+        setTaskStatus(taskId, passed ? 'success' : 'failed');
       } else {
-        state.status = 'success';
+        setTaskStatus(taskId, 'success');
       }
 
       // 6. Write output file with RAW stdout (preserves driver output format).
@@ -478,7 +521,7 @@ export async function runPipeline(
       }
 
     } catch (err: unknown) {
-      state.status = 'failed';
+      setTaskStatus(taskId, 'failed');
       state.finishedAt = nowISO();
       const errMsg = err instanceof Error ? (err.stack ?? err.message) : String(err);
       log.error(`[task:${taskId}]`, `failed before execution: ${errMsg}`);
@@ -502,40 +545,44 @@ export async function runPipeline(
   }
 
   // ── Event loop ──
-  try {
-    let progress = true;
-    while (progress && !pipelineAborted) {
-      progress = false;
+  // Each task is launched as soon as ALL its deps reach a terminal state.
+  // We track in-flight tasks in `running` so a task completing mid-batch
+  // immediately unblocks its dependents without waiting for sibling tasks.
+  const running = new Map<string, Promise<void>>();
 
-      // Collect tasks whose deps are all terminal and that are still waiting
-      const launchable: string[] = [];
+  try {
+    while (!pipelineAborted) {
+      // Launch every task whose deps are all terminal and that isn't already in-flight
       for (const [id, state] of states) {
-        if (state.status !== 'waiting') continue;
+        if (state.status !== 'waiting' || running.has(id)) continue;
         const node = dag.nodes.get(id)!;
         const allDepsTerminal = node.dependsOn.length === 0 ||
           node.dependsOn.every(d => isTerminal(states.get(d)!.status));
-        if (allDepsTerminal) launchable.push(id);
+        if (!allDepsTerminal) continue;
+        const p = processTask(id).finally(() => running.delete(id));
+        running.set(id, p);
       }
 
-      if (launchable.length === 0) {
-        // Check if anything is still running (trigger waits etc.)
-        const anyNonTerminal = [...states.values()].some(s => !isTerminal(s.status));
-        if (!anyNonTerminal) break;
+      // All tasks terminal — done
+      if ([...states.values()].every(s => isTerminal(s.status))) break;
+
+      if (running.size === 0) {
+        // Nothing in-flight but non-terminal tasks exist (e.g. trigger-wait states
+        // that processTask hasn't been called for yet). Poll briefly.
         await new Promise(r => setTimeout(r, 50));
-        progress = true;
-        continue;
+      } else {
+        // Wait for any one task to finish, then re-scan for new launchables.
+        await Promise.race(running.values());
       }
-
-      // Launch all launchable tasks concurrently
-      await Promise.all(launchable.map(id => processTask(id)));
-      progress = true;
     }
 
     if (pipelineAborted) {
-      for (const [, state] of states) {
+      // Wait for in-flight tasks to honour the abort signal before marking states.
+      if (running.size > 0) await Promise.allSettled(running.values());
+      for (const [id, state] of states) {
         if (!isTerminal(state.status)) {
           // Running tasks get timeout (they were killed); waiting tasks get skipped
-          state.status = state.status === 'running' ? 'timeout' : 'skipped';
+          setTaskStatus(id, state.status === 'running' ? 'timeout' : 'skipped');
           state.finishedAt = nowISO();
         }
       }
@@ -597,20 +644,27 @@ export async function runPipeline(
   console.log(`  Duration: ${(durationMs / 1000).toFixed(1)}s`);
   console.log(`  Log: ${log.path}`);
 
-  // Prune old per-run log directories, keeping only the most recent maxLogRuns.
-  if (maxLogRuns > 0) {
-    await pruneLogDirs(resolve(workDir, 'logs'), maxLogRuns);
-  }
-
+  emit({ type: 'pipeline_end', runId, success: allSuccess });
   return { success: allSuccess, runId, logPath: log.path, summary, states };
+
+  } finally {
+    // Prune old per-run log directories on every exit path (normal, blocked, or thrown).
+    // Exclude the current runId so a concurrent run cannot delete its own live directory.
+    if (maxLogRuns > 0) {
+      await pruneLogDirs(resolve(workDir, 'logs'), maxLogRuns, runId);
+    }
+  }
 }
 
 /**
  * Delete the oldest subdirectories under `logsDir`, keeping only the most recent `keep`.
  * Directories are sorted lexicographically; because runIds are prefixed with a base-36
  * timestamp, lexicographic order equals chronological order.
+ *
+ * `excludeRunId` is always skipped from deletion even if it would otherwise be pruned —
+ * this prevents a concurrent run from removing a live log directory that is still in use.
  */
-async function pruneLogDirs(logsDir: string, keep: number): Promise<void> {
+async function pruneLogDirs(logsDir: string, keep: number, excludeRunId: string): Promise<void> {
   let entries: string[];
   try {
     entries = await readdir(logsDir);
@@ -618,8 +672,8 @@ async function pruneLogDirs(logsDir: string, keep: number): Promise<void> {
     return; // logsDir doesn't exist yet — nothing to prune
   }
 
-  // Only consider directories that look like run IDs (run_<...>)
-  const runDirs = entries.filter(e => e.startsWith('run_')).sort();
+  // Only consider directories that look like run IDs (run_<...>), excluding the live run.
+  const runDirs = entries.filter(e => e.startsWith('run_') && e !== excludeRunId).sort();
   const toDelete = runDirs.slice(0, Math.max(0, runDirs.length - keep));
 
   await Promise.all(

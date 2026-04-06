@@ -5,10 +5,10 @@
 
 // ── Core engine ──
 export { runPipeline } from './engine';
-export type { EngineResult, RunPipelineOptions } from './engine';
+export type { EngineResult, RunPipelineOptions, PipelineEvent } from './engine';
 
-// ── Schema: parse / resolve / load ──
-export { parseYaml, resolveConfig, expandTemplates, loadPipeline } from './schema';
+// ── Schema: parse / resolve / load / serialize / validate ──
+export { parseYaml, resolveConfig, expandTemplates, loadPipeline, serializePipeline, validateConfig } from './schema';
 
 // ── DAG ──
 export { buildDag } from './dag';

@@ -16,9 +16,7 @@ export function registerPlugin<T extends PluginType>(
   category: PluginCategory, type: string, handler: T,
 ): void {
   const registry = registries[category] as Map<string, T>;
-  if (registry.has(type)) {
-    throw new Error(`${category} type "${type}" is already registered`);
-  }
+  if (registry.has(type)) return; // idempotent — skip duplicate registration
   registry.set(type, handler);
 }
 
