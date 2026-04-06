@@ -1,7 +1,7 @@
 import type {
   DriverPlugin, DriverCapabilities, DriverResultMeta,
   TaskConfig, TrackConfig, DriverContext, SpawnSpec, Permissions,
-} from '@tagma-sdk/types';
+} from '@tagma/types';
 
 const MODEL_MAP: Record<string, string> = {
   high: 'opencode/big-pickle', medium: 'opencode/big-pickle', low: 'opencode/big-pickle',

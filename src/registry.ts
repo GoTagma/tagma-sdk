@@ -29,7 +29,7 @@ export function getHandler<T extends PluginType>(
   if (!handler) {
     throw new Error(
       `${category} type "${type}" not registered.\n` +
-      `Install the plugin: bun add @tagma-sdk/${category.replace(/s$/, '')}-${type}`
+      `Install the plugin: bun add @tagma/${category.replace(/s$/, '')}-${type}`
     );
   }
   return handler as T;

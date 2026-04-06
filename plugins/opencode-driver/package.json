@@ -1,15 +1,17 @@
 {
-  "name": "@tagma-sdk/driver-opencode",
-  "version": "0.1.0",
+  "name": "@tagma/driver-opencode",
+  "version": "0.1.2",
   "description": "OpenCode CLI driver for tagma-sdk pipelines",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "peerDependencies": {
-    "@tagma-sdk/types": "^0.1.0",
+    "@tagma/types": "^0.1.0",
     "bun-types": "*"
   }
 }

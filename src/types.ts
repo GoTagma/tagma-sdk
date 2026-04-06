@@ -1,13 +1,13 @@
 // ═══ Engine-facing type surface ═══
 //
-// All type definitions live in the shared `@tagma-sdk/types` workspace package
+// All type definitions live in the shared `@tagma/types` workspace package
 // so that plugins under plugins/* can depend on the same types without
 // reaching into the engine's internals. This file re-exports everything
 // and adds runtime-only values (constants) that plugins don't need.
 
-export * from '@tagma-sdk/types';
+export * from '@tagma/types';
 
-import type { Permissions } from '@tagma-sdk/types';
+import type { Permissions } from '@tagma/types';
 
 // ═══ Runtime Constants ═══
 

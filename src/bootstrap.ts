@@ -4,7 +4,7 @@ import { registerPlugin } from './registry';
 // Only claude-code is built in. Other drivers (codex, opencode) ship as
 // workspace plugins under plugins/ and must be declared in pipeline.yaml
 // via the `plugins` field, e.g.:
-//   plugins: ["@tagma-sdk/driver-codex", "@tagma-sdk/driver-opencode"]
+//   plugins: ["@tagma/driver-codex", "@tagma/driver-opencode"]
 import { ClaudeCodeDriver } from './drivers/claude-code';
 
 // Built-in Triggers

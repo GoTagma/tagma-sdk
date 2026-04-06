@@ -1,4 +1,4 @@
-// ═══ @tagma-sdk/types ═══
+// ═══ @tagma/types ═══
 //
 // Shared type surface for the tagma-sdk engine and all plugins.
 // This package contains ONLY types — no runtime code, no constants.

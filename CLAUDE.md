@@ -7,9 +7,9 @@ A local AI task orchestration SDK. Consumers (editor extensions, CLI tools, scri
 | Package | NPM | Role |
 |---|---|---|
 | `tagma-sdk` | `tagma-sdk` | Core engine |
-| `@tagma-sdk/types` | `@tagma-sdk/types` | Shared type surface — no runtime code |
-| `@tagma-sdk/driver-codex` | `@tagma-sdk/driver-codex` | Codex CLI driver plugin |
-| `@tagma-sdk/driver-opencode` | `@tagma-sdk/driver-opencode` | OpenCode CLI driver plugin |
+| `@tagma/types` | `@tagma/types` | Shared type surface — no runtime code |
+| `@tagma/driver-codex` | `@tagma/driver-codex` | Codex CLI driver plugin |
+| `@tagma/driver-opencode` | `@tagma/driver-opencode` | OpenCode CLI driver plugin |
 
 ## Tech Stack
 
@@ -27,7 +27,7 @@ src/
 ├── dag.ts             # DAG construction & topological sort
 ├── runner.ts          # Task executor (Bun.spawn wrapper)
 ├── schema.ts          # YAML parsing, validation & template expansion
-├── types.ts           # Re-exports @tagma-sdk/types + runtime constants
+├── types.ts           # Re-exports @tagma/types + runtime constants
 ├── registry.ts        # Plugin registry
 ├── hooks.ts           # Hook lifecycle management
 ├── bootstrap.ts       # Built-in plugin pre-registration
@@ -41,9 +41,9 @@ src/
 └── middlewares/       # Built-in middleware: static-context
 
 plugins/
-├── types/             # @tagma-sdk/types — type surface only
-├── codex-driver/      # @tagma-sdk/driver-codex
-└── opencode-driver/   # @tagma-sdk/driver-opencode
+├── types/             # @tagma/types — type surface only
+├── codex-driver/      # @tagma/driver-codex
+└── opencode-driver/   # @tagma/driver-opencode
 ```
 
 ## Key Conventions
@@ -61,4 +61,4 @@ bun run release          # interactive version bump (commit first)
 bun run release:publish  # interactive version bump + publish
 ```
 
-Publish order: `@tagma-sdk/types` → drivers → `tagma-sdk`. New plugins under `plugins/` are auto-scanned.
+Publish order: `@tagma/types` → drivers → `tagma-sdk`. New plugins under `plugins/` are auto-scanned.

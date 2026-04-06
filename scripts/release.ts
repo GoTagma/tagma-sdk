@@ -65,7 +65,7 @@ function scanPackages(): Package[] {
       pkgPath,
       isRoot: false,
       // types first, then other plugins, root SDK last
-      order: pkg.name === "@tagma-sdk/types" ? 0 : i + 1,
+      order: pkg.name === "@tagma/types" ? 0 : i + 1,
     });
   }
 

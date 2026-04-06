@@ -1,13 +1,17 @@
 {
-  "name": "tagma-sdk",
-  "version": "0.1.0",
+  "name": "@tagma/sdk",
+  "version": "0.1.2",
   "type": "module",
-  "workspaces": ["plugins/*"],
+  "workspaces": [
+    "plugins/*"
+  ],
   "main": "./src/sdk.ts",
   "exports": {
     ".": "./src/sdk.ts"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "scripts": {
     "test": "bun test",
     "release": "bun scripts/release.ts",
@@ -16,13 +20,13 @@
   "dependencies": {
     "js-yaml": "^4.1.0",
     "chokidar": "^4.0.0",
-    "@tagma-sdk/types": "workspace:*"
+    "@tagma/types": "latest"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "bun-types": "latest",
     "typescript": "^6.0.2",
-    "@tagma-sdk/driver-codex": "workspace:*",
-    "@tagma-sdk/driver-opencode": "workspace:*"
+    "@tagma/driver-codex": "latest",
+    "@tagma/driver-opencode": "latest"
   }
 }

@@ -9,7 +9,7 @@
 // (text-context fallback). This is weaker than Claude Code's --resume.
 //
 // Usage in pipeline.yaml:
-//   plugins: ["@tagma-sdk/driver-codex"]
+//   plugins: ["@tagma/driver-codex"]
 //   tracks:
 //     - driver: codex
 //       ...
@@ -17,7 +17,7 @@
 import type {
   DriverPlugin, DriverCapabilities, TaskConfig, TrackConfig,
   DriverContext, SpawnSpec, Permissions,
-} from '@tagma-sdk/types';
+} from '@tagma/types';
 
 const MODEL_MAP: Record<string, string> = {
   high: 'gpt-5-codex', medium: 'gpt-5-codex', low: 'gpt-5-codex',

@@ -44,5 +44,5 @@ export type { HookResult, PipelineInfo, TrackInfo, TaskInfo } from './hooks';
 // ── Utils (public subset) ──
 export { parseDuration, validatePath, generateRunId, nowISO, truncateForName } from './utils';
 
-// ── All types from @tagma-sdk/types + runtime constants ──
+// ── All types from @tagma/types + runtime constants ──
 export * from './types';
