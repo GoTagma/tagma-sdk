@@ -6,7 +6,7 @@ A local AI task orchestration SDK. Consumers (editor extensions, CLI tools, scri
 
 | Package | NPM | Role |
 |---|---|---|
-| `tagma-sdk` | `tagma-sdk` | Core engine |
+| `@tagma/sdk` | `@tagma/sdk` | Core engine |
 | `@tagma/types` | `@tagma/types` | Shared type surface — no runtime code |
 | `@tagma/driver-codex` | `@tagma/driver-codex` | Codex CLI driver plugin |
 | `@tagma/driver-opencode` | `@tagma/driver-opencode` | OpenCode CLI driver plugin |
@@ -64,4 +64,4 @@ bun run release          # interactive version bump (commit first)
 bun run release:publish  # interactive version bump + publish
 ```
 
-Publish order: `@tagma/types` → drivers → `tagma-sdk`. New plugins under `plugins/` are auto-scanned.
+Publish order: `@tagma/types` → drivers → `@tagma/sdk`. New plugins under `plugins/` are auto-scanned.
