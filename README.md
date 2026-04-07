@@ -117,7 +117,7 @@ Options:
   - `pipeline_start` — pipeline began; includes `states: ReadonlyMap<taskId, TaskState>` (initial snapshot of all tasks at `waiting`)
   - `task_status_change` — a task changed status; includes `state: TaskState` (complete snapshot at the time of change: `startedAt` is populated before the `running` event; `result` and `finishedAt` are populated before any terminal-status event)
   - `pipeline_end` — pipeline finished; includes `success: boolean`
-- `maxLogRuns` -- number of per-run log directories to keep under `<workDir>/logs/` (default: 20)
+- `maxLogRuns` -- number of per-run log directories to keep under `<workDir>/.tagma/logs/` (default: 20)
 
 ### `PipelineRunner`
 

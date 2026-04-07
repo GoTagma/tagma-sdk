@@ -108,9 +108,8 @@ export class PipelineRunner {
    * Returns null only if the pipeline has never started.
    */
   getStates(): ReadonlyMap<string, TaskState> | null {
-    if (this._states) return this._states;
-    // Return a snapshot copy so callers cannot mutate SDK-internal state.
-    if (this._statesMirror.size > 0) return new Map([...this._statesMirror]);
+    if (this._states) return snapshotStates(this._states);
+    if (this._statesMirror.size > 0) return snapshotStates(this._statesMirror);
     return null;
   }
 
@@ -123,4 +122,20 @@ export class PipelineRunner {
     this._handlers.add(handler);
     return () => this._handlers.delete(handler);
   }
+}
+
+/** Deep-copy a states map so callers cannot mutate SDK internals. */
+function snapshotStates(src: ReadonlyMap<string, TaskState>): ReadonlyMap<string, TaskState> {
+  const copy = new Map<string, TaskState>();
+  for (const [id, s] of src) {
+    copy.set(id, {
+      config: s.config,
+      trackConfig: s.trackConfig,
+      status: s.status,
+      result: s.result,
+      startedAt: s.startedAt,
+      finishedAt: s.finishedAt,
+    });
+  }
+  return copy;
 }

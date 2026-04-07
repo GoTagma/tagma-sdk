@@ -29,7 +29,10 @@ function preflight(config: PipelineConfig, dag: Dag): void {
     const track = node.track;
     const driverName = task.driver ?? track.driver ?? config.driver ?? 'claude-code';
 
-    if (!hasHandler('drivers', driverName)) {
+    // Pure command tasks don't use a driver — skip driver registration check.
+    const isCommandOnly = task.command && !task.prompt;
+
+    if (!isCommandOnly && !hasHandler('drivers', driverName)) {
       errors.push(`Task "${node.taskId}": driver "${driverName}" not registered`);
     }
 
@@ -117,7 +120,7 @@ export type PipelineEvent =
 export interface RunPipelineOptions {
   readonly approvalGateway?: ApprovalGateway;
   /**
-   * Maximum number of per-run log directories to retain under `<workDir>/logs/`.
+   * Maximum number of per-run log directories to retain under `<workDir>/.tagma/logs/`.
    * Oldest directories are deleted after each run. Defaults to 20. Set to 0 to disable cleanup.
    */
   readonly maxLogRuns?: number;
@@ -207,7 +210,7 @@ export async function runPipeline(
       runId,
       logPath: log.path,
       summary: { total: dag.nodes.size, success: 0, failed: 0, skipped: 0, timeout: 0, blocked: 0 },
-      states,
+      states: freezeStates(states),
     };
   }
 
@@ -697,7 +700,7 @@ export async function runPipeline(
   console.log(`  Log: ${log.path}`);
 
   emit({ type: 'pipeline_end', runId, success: allSuccess });
-  return { success: allSuccess, runId, logPath: log.path, summary, states };
+  return { success: allSuccess, runId, logPath: log.path, summary, states: freezeStates(states) };
 
   } finally {
     // Prune old per-run log directories on every exit path (normal, blocked, or thrown).
@@ -740,4 +743,20 @@ async function pruneLogDirs(logsDir: string, keep: number, excludeRunId: string)
 function isTerminal(status: TaskStatus): boolean {
   return status === 'success' || status === 'failed' || status === 'timeout'
     || status === 'skipped' || status === 'blocked';
+}
+
+/** Return a deep-copied, caller-safe snapshot of the states map. */
+function freezeStates(states: Map<string, TaskState>): ReadonlyMap<string, TaskState> {
+  const copy = new Map<string, TaskState>();
+  for (const [id, s] of states) {
+    copy.set(id, {
+      config: s.config,
+      trackConfig: s.trackConfig,
+      status: s.status,
+      result: s.result,
+      startedAt: s.startedAt,
+      finishedAt: s.finishedAt,
+    });
+  }
+  return copy;
 }

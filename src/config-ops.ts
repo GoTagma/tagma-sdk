@@ -140,6 +140,12 @@ export function removeTask(
 
   const qualId = `${trackId}.${taskId}`;
 
+  // After deletion, can a bare ref "taskId" still resolve to some other task globally?
+  // It can if any track in the post-deletion config still contains a task with that bare id.
+  const bareIdSurvivesGlobally = withoutTask.tracks.some(t =>
+    t.tasks.some(tk => tk.id === taskId),
+  );
+
   return {
     ...withoutTask,
     tracks: withoutTask.tracks.map(t => {
@@ -149,15 +155,19 @@ export function removeTask(
 
       // Resolve whether a ref in THIS track points to the deleted task:
       //   - Fully-qualified ref ("trackId.taskId") — always points to the deleted task.
-      //   - Bare ref ("taskId") from the same track — always pointed to the deleted task
-      //     (same-track lookup takes priority, and the task was in this track).
-      //   - Bare ref from a different track — points to the deleted task only if this
-      //     track has no task with that same id (no local task to shadow it).
+      //   - Bare ref ("taskId") from the SAME track as the deleted task — always pointed
+      //     to the deleted task (same-track lookup takes priority).
+      //   - Bare ref from a DIFFERENT track:
+      //       1. If this track has a local task with that id → ref resolves locally, not removed.
+      //       2. Else if some other track still has a task with that id → ref will resolve
+      //          there after deletion, not removed.
+      //       3. Else → ref is dangling, remove it.
       const isRemovedFrom = (ref: string): boolean => {
         if (ref === qualId) return true;
         if (ref === taskId) {
           if (t.id === trackId) return true;            // same track — was pointing here
-          return !remainingIds.has(taskId);             // cross-track — only if no local override
+          if (remainingIds.has(taskId)) return false;   // local task shadows — ref is fine
+          return !bareIdSurvivesGlobally;               // remove only if truly dangling
         }
         return false;
       };
