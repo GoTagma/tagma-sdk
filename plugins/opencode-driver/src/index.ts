@@ -53,18 +53,25 @@ const OpenCodeDriver: DriverPlugin = {
       }
     }
 
+    // opencode run does not support stdin (no `-` placeholder like codex exec).
+    // Prompt is always a positional argument. Flags must be declared before `--`;
+    // the prompt follows after so that leading `--flag` content cannot be
+    // misread by opencode's argument parser (flag-injection mitigation).
+    // Shell-level injection is already prevented by Bun.spawn's direct argv array.
     const args: string[] = [
       'opencode',
-      'run',                    // subcommand
-      prompt,                   // positional message
+      'run',
       '--model', model,
       '--format', 'json',       // JSON output for parseResult
     ];
 
-    // session resume
+    // session resume (must appear before --)
     if (sessionId) {
       args.push('--session', sessionId);
     }
+
+    // `--` (POSIX end-of-options) isolates prompt from flag parsing
+    args.push('--', prompt);
 
     return { args, cwd: task.cwd ?? ctx.workDir };
   },

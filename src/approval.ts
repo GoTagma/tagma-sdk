@@ -16,6 +16,9 @@ export type {
   ApprovalListener, ApprovalGateway,
 } from '@tagma/types';
 
+// Default options presented to the approver when the caller does not specify any.
+const DEFAULT_APPROVAL_OPTIONS = ['approve', 'reject'] as const;
+
 // ═══ Default In-Memory Implementation ═══
 
 interface PendingEntry {
@@ -37,7 +40,7 @@ export class InMemoryApprovalGateway implements ApprovalGateway {
       taskId: req.taskId,
       trackId: req.trackId,
       message: req.message,
-      options: req.options && req.options.length > 0 ? req.options : ['approve', 'reject'],
+      options: req.options && req.options.length > 0 ? req.options : DEFAULT_APPROVAL_OPTIONS,
       timeoutMs: req.timeoutMs,
       metadata: req.metadata,
     };

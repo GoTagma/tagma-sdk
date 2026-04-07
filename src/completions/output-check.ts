@@ -29,7 +29,7 @@ export const OutputCheckCompletion: CompletionPlugin = {
       if (proc.stdin) {
         try {
           proc.stdin.write(result.stdout);
-          await proc.stdin.end();
+          proc.stdin.end(); // no await — consistent with runner.ts; proc.exited handles sync
         } catch (err: unknown) {
           // EPIPE is expected when the check process exits before reading all of stdin
           // (e.g. `grep -q` exits on first match). Anything else is a real failure.
@@ -38,15 +38,15 @@ export const OutputCheckCompletion: CompletionPlugin = {
         }
       }
 
-      const exitCode = await proc.exited;
+      // Consume stderr concurrently with waiting for exit to prevent pipe-buffer
+      // deadlock when check script emits more than ~64 KB of stderr output.
+      const [exitCode, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stderr).text(),
+      ]);
 
-      if (exitCode !== 0) {
-        try {
-          const stderr = await new Response(proc.stderr).text();
-          if (stderr.trim()) {
-            console.warn(`[output_check] "${checkCmd}" exit=${exitCode}: ${stderr.trim()}`);
-          }
-        } catch { /* ignore stderr read failures */ }
+      if (exitCode !== 0 && stderr.trim()) {
+        console.warn(`[output_check] "${checkCmd}" exit=${exitCode}: ${stderr.trim()}`);
       }
 
       return exitCode === 0;

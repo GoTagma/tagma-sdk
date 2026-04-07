@@ -9,7 +9,7 @@ import { mkdirSync, appendFileSync, writeFileSync } from 'node:fs';
  *   - `section`         → file ONLY (visual separators)
  *   - `quiet`           → file ONLY (bulk payload like full stdout dumps)
  *
- * Log file path: <workDir>/tmp/pipeline.log (one file per pipeline run,
+ * Log file path: <workDir>/.tagma/logs/<runId>/pipeline.log (one file per pipeline run,
  * truncated on construction).
  */
 export class Logger {
@@ -17,7 +17,7 @@ export class Logger {
   private readonly runDir: string;
 
   constructor(workDir: string, runId: string) {
-    this.runDir = resolve(workDir, 'logs', runId);
+    this.runDir = resolve(workDir, '.tagma', 'logs', runId);
     this.filePath = resolve(this.runDir, 'pipeline.log');
     mkdirSync(dirname(this.filePath), { recursive: true });
     writeFileSync(
@@ -98,10 +98,15 @@ export function tailLines(text: string, n: number): string {
 /**
  * Truncate a blob to at most `maxBytes` UTF-8 bytes for log embedding,
  * appending a marker when truncation occurred.
+ * Uses TextEncoder so CJK and emoji (multi-byte) characters are counted correctly.
  */
 export function clip(text: string, maxBytes = 16 * 1024): string {
   if (!text) return '';
-  if (text.length <= maxBytes) return text;
-  const omitted = text.length - maxBytes;
-  return text.slice(0, maxBytes) + `\n…[truncated ${omitted} chars]`;
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(text);
+  if (bytes.length <= maxBytes) return text;
+  const omittedBytes = bytes.length - maxBytes;
+  // TextDecoder handles partial code-point boundaries safely (replacement char insertion)
+  const truncated = new TextDecoder().decode(bytes.slice(0, maxBytes));
+  return truncated + `\n…[truncated ${omittedBytes} bytes]`;
 }

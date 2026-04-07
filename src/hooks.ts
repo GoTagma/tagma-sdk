@@ -37,9 +37,18 @@ async function runSingleHook(command: string, context: unknown, cwd?: string): P
     }
   }
 
-  const exitCode = await proc.exited;
-  const stderr = await new Response(proc.stderr).text();
+  // Consume stdout and stderr concurrently with waiting for exit.
+  // Sequential reads after proc.exited risk a pipe-buffer deadlock when
+  // hook output exceeds the ~64 KB kernel buffer.
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
 
+  if (stdout.trim()) {
+    console.log(`[hook: ${command}] stdout: ${stdout.trim()}`);
+  }
   if (stderr.trim()) {
     console.error(`[hook: ${command}] stderr: ${stderr.trim()}`);
   }

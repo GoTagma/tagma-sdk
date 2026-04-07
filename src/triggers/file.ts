@@ -56,6 +56,17 @@ export const FileTrigger: TriggerPlugin = {
         }
       });
 
+      // Also fire on 'change' so that overwriting an existing file is detected.
+      // Without this, upstream tasks that truncate-and-rewrite a file emit only
+      // a 'change' event and the downstream trigger would never resolve.
+      watcher.on('change', (changedPath: string) => {
+        if (settled) return;
+        if (pathsEqual(resolve(changedPath), safePath)) {
+          cleanup();
+          resolve_p({ path: safePath });
+        }
+      });
+
       watcher.on('error', (err: unknown) => {
         if (settled) return;
         cleanup();

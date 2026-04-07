@@ -5,7 +5,7 @@ import type {
   TrackConfig, TaskConfig, Permissions, MiddlewareConfig,
   TemplateConfig, TemplateParamDef,
 } from './types';
-import { truncateForName, validatePathParam } from './utils';
+import { truncateForName, validatePathParam, validatePath } from './utils';
 import { DEFAULT_PERMISSIONS } from './types';
 import { buildDag } from './dag';
 
@@ -74,7 +74,26 @@ export async function expandTemplates(
   return result;
 }
 
+function validateTemplateRef(ref: string): void {
+  const stripped = ref.replace(/@v\d+$/, '');
+  // Reject path traversal and absolute paths before they reach import().
+  if (stripped.includes('..') || stripped.startsWith('/') || /^[a-zA-Z]:/.test(stripped)) {
+    throw new Error(
+      `Invalid template ref "${ref}": path traversal and absolute paths are not allowed. ` +
+      `Use a scoped package name, e.g. "@tagma/template-review".`
+    );
+  }
+  // Whitelist: only @tagma/template-* packages are allowed.
+  if (!stripped.startsWith('@tagma/template-')) {
+    throw new Error(
+      `Invalid template ref "${ref}": only "@tagma/template-*" packages are allowed as templates. ` +
+      `Example: "@tagma/template-review".`
+    );
+  }
+}
+
 async function loadTemplate(ref: string): Promise<TemplateConfig> {
+  validateTemplateRef(ref);
   // Strip version suffix for import
   const moduleName = ref.replace(/@v\d+$/, '');
   try {
@@ -87,7 +106,8 @@ async function loadTemplate(ref: string): Promise<TemplateConfig> {
     const content = await Bun.file(pkgPath).text();
     const doc = yaml.load(content) as { template: TemplateConfig };
     return doc.template;
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Invalid template ref')) throw err;
     throw new Error(`Failed to load template: "${ref}". Is the package installed?`);
   }
 }
@@ -191,7 +211,8 @@ function expandTemplateTask(
 export function resolveConfig(raw: RawPipelineConfig, workDir: string): PipelineConfig {
   const tracks: TrackConfig[] = raw.tracks.map(rawTrack => {
     const trackDriver = rawTrack.driver ?? raw.driver;
-    const trackCwd = rawTrack.cwd ? resolve(workDir, rawTrack.cwd) : workDir;
+    // validatePath enforces no .. traversal and no absolute paths escaping workDir.
+    const trackCwd = rawTrack.cwd ? validatePath(rawTrack.cwd, workDir) : workDir;
 
     const tasks: TaskConfig[] = rawTrack.tasks.map(rawTask => {
       const name = rawTask.name
@@ -215,7 +236,7 @@ export function resolveConfig(raw: RawPipelineConfig, workDir: string): Pipeline
         middlewares: rawTask.middlewares !== undefined ? rawTask.middlewares : rawTrack.middlewares,
         completion: rawTask.completion,
         agent_profile: rawTask.agent_profile ?? rawTrack.agent_profile,
-        cwd: rawTask.cwd ? resolve(workDir, rawTask.cwd) : trackCwd,
+        cwd: rawTask.cwd ? validatePath(rawTask.cwd, workDir) : trackCwd,
       };
     });
 
@@ -242,6 +263,13 @@ export function resolveConfig(raw: RawPipelineConfig, workDir: string): Pipeline
     hooks: raw.hooks,
     tracks,
   };
+}
+
+// Field-by-field permissions comparison — avoids relying on JSON.stringify key order.
+function permissionsEqual(a: Permissions | undefined, b: Permissions | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.read === b.read && a.write === b.write && a.execute === b.execute;
 }
 
 // ═══ YAML Serialization ═══
@@ -291,7 +319,7 @@ export function deresolvePipeline(config: PipelineConfig, workDir: string): RawP
         ...(task.middlewares !== undefined ? { middlewares: task.middlewares } : {}),
         ...(task.completion ? { completion: task.completion } : {}),
         ...(task.agent_profile ? { agent_profile: task.agent_profile } : {}),
-        ...(task.permissions && JSON.stringify(task.permissions) !== JSON.stringify(track.permissions)
+        ...(task.permissions && !permissionsEqual(task.permissions, track.permissions)
           ? { permissions: task.permissions }
           : {}),
       };
@@ -307,7 +335,7 @@ export function deresolvePipeline(config: PipelineConfig, workDir: string): RawP
       ...(trackCwdRel ? { cwd: trackCwdRel } : {}),
       ...(track.middlewares?.length ? { middlewares: track.middlewares } : {}),
       ...(track.on_failure && track.on_failure !== 'skip_downstream' ? { on_failure: track.on_failure } : {}),
-      ...(track.permissions && JSON.stringify(track.permissions) !== JSON.stringify(DEFAULT_PERMISSIONS)
+      ...(track.permissions && !permissionsEqual(track.permissions, DEFAULT_PERMISSIONS)
         ? { permissions: track.permissions }
         : {}),
       tasks,

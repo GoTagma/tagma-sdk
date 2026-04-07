@@ -38,8 +38,10 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
   // ── Build qualified ID sets for cross-reference checks ──
   // Qualified ID format: "trackId.taskId" (mirrors the engine's convention)
   const allQualified = new Set<string>();
-  // For bare depends_on references: bare taskId → first qualified ID found
+  // bare taskId → qualified ID, or "__ambiguous__" when multiple tracks share that bare name.
+  // "__ambiguous__" signals that a bare ref is unresolvable without a track prefix.
   const bareToQualified = new Map<string, string>();
+  const bareIdCount = new Map<string, number>();
 
   for (const track of config.tracks) {
     if (!track.id) continue;
@@ -47,9 +49,10 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
       if (!task.id) continue;
       const qid = `${track.id}.${task.id}`;
       allQualified.add(qid);
-      if (!bareToQualified.has(task.id)) {
-        bareToQualified.set(task.id, qid);
-      }
+      const count = (bareIdCount.get(task.id) ?? 0) + 1;
+      bareIdCount.set(task.id, count);
+      // Mark as ambiguous when a second track introduces the same bare name.
+      bareToQualified.set(task.id, count === 1 ? qid : '__ambiguous__');
     }
   }
 
@@ -108,6 +111,11 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
               path: `${taskPath}.depends_on`,
               message: `Task "${task.id}": depends_on "${dep}" — no such task found`,
             });
+          } else if (resolved === '__ambiguous__') {
+            errors.push({
+              path: `${taskPath}.depends_on`,
+              message: `Task "${task.id}": depends_on "${dep}" is ambiguous — multiple tracks have a task with this id. Use the fully-qualified form "trackId.${dep}".`,
+            });
           }
         }
       }
@@ -119,6 +127,11 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
           errors.push({
             path: `${taskPath}.continue_from`,
             message: `Task "${task.id}": continue_from "${task.continue_from}" — no such task found`,
+          });
+        } else if (resolved === '__ambiguous__') {
+          errors.push({
+            path: `${taskPath}.continue_from`,
+            message: `Task "${task.id}": continue_from "${task.continue_from}" is ambiguous — multiple tracks have a task with this id. Use the fully-qualified form "trackId.${task.continue_from}".`,
           });
         }
       }
@@ -133,18 +146,19 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
 
 // ── Helpers ──
 
+// Returns the resolved qualified ID, null (not found), or '__ambiguous__' (multiple tracks match).
 function resolveDepRef(
   ref: string,
   fromTrackId: string,
   allQualified: Set<string>,
   bareToQualified: Map<string, string>,
 ): string | null {
-  // Fully qualified reference (trackId.taskId)
+  // Fully qualified reference (trackId.taskId) — always unambiguous
   if (allQualified.has(ref)) return ref;
-  // Same-track shorthand (just taskId)
+  // Same-track shorthand — always unambiguous (shadows any global bare match)
   const sameTrack = `${fromTrackId}.${ref}`;
   if (allQualified.has(sameTrack)) return sameTrack;
-  // Global bare lookup (first match across all tracks)
+  // Global bare lookup — may be '__ambiguous__' when multiple tracks share the name
   return bareToQualified.get(ref) ?? null;
 }
 
@@ -177,13 +191,19 @@ function detectCycles(
   const errors: ValidationError[] = [];
   const visited = new Set<string>();
   const inStack = new Set<string>();
+  // Deduplicate cycles: the same cycle can be discovered from multiple entry points.
+  // Canonical key = sorted node list joined — order-independent fingerprint.
+  const seenCycles = new Set<string>();
 
   function dfs(id: string, path: string[]): void {
     if (inStack.has(id)) {
-      // Trim path to just the cycle portion
       const cycleStart = path.indexOf(id);
-      const cycle = [...path.slice(cycleStart), id].join(' → ');
-      errors.push({ path: 'tracks', message: `Circular dependency detected: ${cycle}` });
+      const cycleNodes = [...path.slice(cycleStart), id];
+      const key = [...cycleNodes].sort().join(',');
+      if (!seenCycles.has(key)) {
+        seenCycles.add(key);
+        errors.push({ path: 'tracks', message: `Circular dependency detected: ${cycleNodes.join(' → ')}` });
+      }
       return;
     }
     if (visited.has(id)) return;

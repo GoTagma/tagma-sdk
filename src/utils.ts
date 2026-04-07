@@ -1,4 +1,5 @@
 import { resolve, relative } from 'path';
+import { randomBytes } from 'crypto';
 
 const DURATION_RE = /^(\d+(?:\.\d+)?)\s*(s|m|h)$/;
 
@@ -49,12 +50,18 @@ let runCounter = 0;
 
 export function generateRunId(): string {
   const ts = Date.now().toString(36);
-  const seq = (runCounter++).toString(36);
-  return `run_${ts}_${seq}`;
+  const seq = (runCounter++).toString(36).padStart(2, '0');
+  // Random suffix prevents ID collisions when two pipelines start within
+  // the same millisecond or after a process restart resets the counter.
+  const rand = randomBytes(3).toString('hex');
+  return `run_${ts}_${seq}_${rand}`;
 }
 
 export function truncateForName(text: string, maxLen = 40): string {
-  const first = text.split('\n')[0].trim();
+  const first = text.split('\n')[0]!.trim();
+  // Guard: if the first line is empty (e.g. prompt is all whitespace/newlines),
+  // fall back to the raw text trimmed rather than silently producing an empty name.
+  if (!first) return text.trim().slice(0, maxLen) || '...';
   return first.length > maxLen ? first.slice(0, maxLen) + '...' : first;
 }
 

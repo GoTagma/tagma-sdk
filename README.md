@@ -115,7 +115,7 @@ Options:
 - `signal` -- `AbortSignal` to cancel the run externally
 - `onEvent` -- callback for real-time `PipelineEvent` updates:
   - `pipeline_start` — pipeline began; includes `states: ReadonlyMap<taskId, TaskState>` (initial snapshot of all tasks at `waiting`)
-  - `task_status_change` — a task changed status; includes `state: TaskState` (complete snapshot at the time of change, with `result` and `finishedAt` already populated for terminal statuses)
+  - `task_status_change` — a task changed status; includes `state: TaskState` (complete snapshot at the time of change: `startedAt` is populated before the `running` event; `result` and `finishedAt` are populated before any terminal-status event)
   - `pipeline_end` — pipeline finished; includes `success: boolean`
 - `maxLogRuns` -- number of per-run log directories to keep under `<workDir>/logs/` (default: 20)
 
@@ -188,7 +188,7 @@ const yaml = serializePipeline(config);
 | `moveTrack(config, trackId, toIndex)` | Reorder a track |
 | `updateTrack(config, trackId, fields)` | Patch track fields (not tasks) |
 | `upsertTask(config, trackId, task)` | Insert or replace a task |
-| `removeTask(config, trackId, taskId, cleanRefs?)` | Remove a task; pass `cleanRefs: true` to also strip dangling `depends_on` / `continue_from` references from other tasks |
+| `removeTask(config, trackId, taskId, cleanRefs?)` | Remove a task; pass `cleanRefs: true` to also strip dangling `depends_on` / `continue_from` references. Only refs that resolve to the deleted task are removed — same-named tasks in other tracks are unaffected |
 | `moveTask(config, trackId, taskId, toIndex)` | Reorder a task within its track |
 | `transferTask(config, fromTrackId, taskId, toTrackId)` | Move a task across tracks |
 
@@ -224,7 +224,7 @@ Use `validateRaw` for editing raw configs in a UI; use `validateConfig` after `r
 
 Validates a raw pipeline config without resolving inheritance or executing anything. Returns a flat list of `{ path, message }` objects — empty array means valid.
 
-Checks: required fields, `prompt`/`command` exclusivity, `depends_on`/`continue_from` reference integrity, circular dependency detection.
+Checks: required fields, `prompt`/`command` exclusivity, `depends_on`/`continue_from` reference integrity (including ambiguous bare refs that exist in multiple tracks — use `trackId.taskId` to disambiguate), circular dependency detection.
 
 Does **not** check plugin registration (plugins may not be loaded at edit time).
 

@@ -28,6 +28,12 @@ export interface WebSocketApprovalAdapter {
   readonly detach: () => void;
 }
 
+// Maximum allowed message payload (bytes) to prevent DoS via oversized messages.
+const MAX_PAYLOAD_BYTES = 4_096;
+// Per-client rate limit: at most this many messages per window.
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_MS = 1_000;
+
 export function attachWebSocketApprovalAdapter(
   gateway: ApprovalGateway,
   options: WebSocketApprovalAdapterOptions = {},
@@ -35,7 +41,9 @@ export function attachWebSocketApprovalAdapter(
   const port = options.port ?? 3000;
   const hostname = options.hostname ?? 'localhost';
 
-  const clients = new Set<import('bun').ServerWebSocket<unknown>>();
+  type WS = import('bun').ServerWebSocket<unknown>;
+  const clients = new Set<WS>();
+  const clientRates = new Map<WS, { count: number; resetAt: number }>();
 
   function broadcast(msg: unknown): void {
     const text = JSON.stringify(msg);
@@ -78,9 +86,31 @@ export function attachWebSocketApprovalAdapter(
       },
 
       message(ws, raw) {
+        const rawStr = typeof raw === 'string' ? raw : raw.toString();
+
+        // Payload size guard — reject oversized messages before parsing.
+        if (rawStr.length > MAX_PAYLOAD_BYTES) {
+          ws.send(JSON.stringify({ type: 'error', message: 'message too large' }));
+          return;
+        }
+
+        // Per-client rate limit.
+        const now = Date.now();
+        const rate = clientRates.get(ws) ?? { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+        if (now >= rate.resetAt) {
+          rate.count = 0;
+          rate.resetAt = now + RATE_LIMIT_WINDOW_MS;
+        }
+        rate.count++;
+        clientRates.set(ws, rate);
+        if (rate.count > RATE_LIMIT_MAX) {
+          ws.send(JSON.stringify({ type: 'error', message: 'rate limit exceeded' }));
+          return;
+        }
+
         let msg: unknown;
         try {
-          msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
+          msg = JSON.parse(rawStr);
         } catch {
           ws.send(JSON.stringify({ type: 'error', message: 'invalid JSON' }));
           return;
@@ -108,6 +138,7 @@ export function attachWebSocketApprovalAdapter(
 
       close(ws) {
         clients.delete(ws);
+        clientRates.delete(ws);
       },
     },
   });

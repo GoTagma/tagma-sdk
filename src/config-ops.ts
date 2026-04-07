@@ -66,10 +66,10 @@ export function moveTrack(
 ): RawPipelineConfig {
   const idx = config.tracks.findIndex(t => t.id === trackId);
   if (idx === -1) return config;
-  const tracks = [...config.tracks];
-  const [track] = tracks.splice(idx, 1);
-  const clamped = Math.max(0, Math.min(toIndex, tracks.length));
-  tracks.splice(clamped, 0, track);
+  const track = config.tracks[idx]!;
+  const withoutTrack = [...config.tracks.slice(0, idx), ...config.tracks.slice(idx + 1)];
+  const clamped = Math.max(0, Math.min(toIndex, withoutTrack.length));
+  const tracks = [...withoutTrack.slice(0, clamped), track, ...withoutTrack.slice(clamped)];
   return { ...config, tracks };
 }
 
@@ -138,16 +138,35 @@ export function removeTask(
 
   if (!cleanRefs) return withoutTask;
 
-  // Both bare ("taskId") and fully-qualified ("trackId.taskId") forms are valid refs
   const qualId = `${trackId}.${taskId}`;
-  const isRemoved = (ref: string) => ref === taskId || ref === qualId;
 
   return {
     ...withoutTask,
-    tracks: withoutTask.tracks.map(t => ({
-      ...t,
-      tasks: t.tasks.map(tk => cleanTaskRefs(tk, isRemoved)),
-    })),
+    tracks: withoutTask.tracks.map(t => {
+      // Build the set of task IDs remaining in this track (the deleted task
+      // has already been removed from its own track in withoutTask).
+      const remainingIds = new Set(t.tasks.map(tk => tk.id));
+
+      // Resolve whether a ref in THIS track points to the deleted task:
+      //   - Fully-qualified ref ("trackId.taskId") — always points to the deleted task.
+      //   - Bare ref ("taskId") from the same track — always pointed to the deleted task
+      //     (same-track lookup takes priority, and the task was in this track).
+      //   - Bare ref from a different track — points to the deleted task only if this
+      //     track has no task with that same id (no local task to shadow it).
+      const isRemovedFrom = (ref: string): boolean => {
+        if (ref === qualId) return true;
+        if (ref === taskId) {
+          if (t.id === trackId) return true;            // same track — was pointing here
+          return !remainingIds.has(taskId);             // cross-track — only if no local override
+        }
+        return false;
+      };
+
+      return {
+        ...t,
+        tasks: t.tasks.map(tk => cleanTaskRefs(tk, isRemovedFrom)),
+      };
+    }),
   };
 }
 
@@ -185,10 +204,10 @@ export function moveTask(
       if (t.id !== trackId) return t;
       const idx = t.tasks.findIndex(tk => tk.id === taskId);
       if (idx === -1) return t;
-      const tasks = [...t.tasks];
-      const [task] = tasks.splice(idx, 1);
-      const clamped = Math.max(0, Math.min(toIndex, tasks.length));
-      tasks.splice(clamped, 0, task);
+      const task = t.tasks[idx]!;
+      const withoutTask = [...t.tasks.slice(0, idx), ...t.tasks.slice(idx + 1)];
+      const clamped = Math.max(0, Math.min(toIndex, withoutTask.length));
+      const tasks = [...withoutTask.slice(0, clamped), task, ...withoutTask.slice(clamped)];
       return { ...t, tasks };
     }),
   };

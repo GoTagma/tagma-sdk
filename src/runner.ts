@@ -3,6 +3,9 @@ import { isAbsolute, join } from 'node:path';
 import type { SpawnSpec, DriverPlugin, TaskResult, TaskConfig } from './types';
 import { shellArgs } from './utils';
 
+// Delay before escalating SIGTERM to SIGKILL when killing a timed-out process.
+const SIGKILL_DELAY_MS = 3_000;
+
 export interface RunOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal; // pipeline-level abort
@@ -15,9 +18,14 @@ export interface RunOptions {
  * manually resolve the command against PATH + PATHEXT here so Drivers can
  * keep using short names (`claude`, `npx`, etc.) cross-platform.
  *
+ * Results are cached by (cmd, envPath) key so repeated spawns of the same
+ * command don't block the event loop with synchronous PATH scans.
+ *
  * Returns the original name if resolution fails; Bun will raise the same
  * ENOENT it would have otherwise.
  */
+const resolvedExeCache = new Map<string, string | null>();
+
 function resolveWindowsExe(
   args: readonly string[],
   envPath: string,
@@ -26,6 +34,14 @@ function resolveWindowsExe(
   const cmd = args[0]!;
   // Already a full path or has an extension → trust caller.
   if (isAbsolute(cmd) || /\.[a-z0-9]+$/i.test(cmd)) return args;
+
+  const cacheKey = `${cmd}\x00${envPath}`;
+  if (resolvedExeCache.has(cacheKey)) {
+    // ?? null coerces undefined→null so cached is string|null and the !== null
+    // check narrows it to string without a spurious 'undefined' arm.
+    const cached = resolvedExeCache.get(cacheKey) ?? null;
+    return cached !== null ? [cached, ...args.slice(1)] : args;
+  }
 
   const exts = (
     process.env.PATHEXT ??
@@ -39,10 +55,12 @@ function resolveWindowsExe(
     for (const ext of exts) {
       const candidate = join(dir, cmd + ext);
       if (existsSync(candidate)) {
+        resolvedExeCache.set(cacheKey, candidate);
         return [candidate, ...args.slice(1)];
       }
     }
   }
+  resolvedExeCache.set(cacheKey, null);
   return args;
 }
 
@@ -118,7 +136,7 @@ export async function runSpawn(
       } catch {
         /* already exited */
       }
-    }, 3_000);
+    }, SIGKILL_DELAY_MS);
   };
 
   if (timeoutMs && timeoutMs > 0) {

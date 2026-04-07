@@ -9,7 +9,7 @@ import type {
 import { buildDag, type Dag, type DagNode } from './dag';
 import { getHandler, hasHandler, loadPlugins } from './registry';
 import { runSpawn, runCommand } from './runner';
-import { parseDuration, nowISO, generateRunId } from './utils';
+import { parseDuration, nowISO, generateRunId, validatePath } from './utils';
 import {
   executeHook,
   buildPipelineStartContext, buildTaskContext,
@@ -54,12 +54,25 @@ function preflight(config: PipelineConfig, dag: Dag): void {
         const upstreamId = resolveRefInDag(dag, task.continue_from, track.id);
         if (upstreamId) {
           const upstream = dag.nodes.get(upstreamId);
-          if (upstream && !upstream.task.output) {
-            errors.push(
-              `Task "${node.taskId}" uses continue_from: "${task.continue_from}", ` +
-              `but upstream task "${upstreamId}" has no "output" field. ` +
-              `Add output to the upstream task, or remove continue_from.`
-            );
+          if (upstream) {
+            // A handoff is possible via session resume (already ruled out above),
+            // an output file, OR in-memory text injection through normalizedMap
+            // (when the upstream driver implements parseResult and returns normalizedOutput).
+            const upstreamDriverName = upstream.task.driver ?? upstream.track.driver
+              ?? config.driver ?? 'claude-code';
+            const upstreamDriver = hasHandler('drivers', upstreamDriverName)
+              ? getHandler<DriverPlugin>('drivers', upstreamDriverName)
+              : null;
+            const canNormalize = typeof upstreamDriver?.parseResult === 'function';
+
+            if (!upstream.task.output && !canNormalize) {
+              errors.push(
+                `Task "${node.taskId}" uses continue_from: "${task.continue_from}", ` +
+                `but upstream task "${upstreamId}" has no "output" field and its driver ` +
+                `does not implement parseResult for text-injection handoff. ` +
+                `Add output to the upstream task, use a driver with parseResult, or remove continue_from.`
+              );
+            }
           }
         }
       }
@@ -119,6 +132,10 @@ export interface RunPipelineOptions {
    */
   readonly onEvent?: (event: PipelineEvent) => void;
 }
+
+// Poll interval when no tasks are in-flight but non-terminal tasks remain
+// (e.g. tasks waiting on a file or manual trigger).
+const POLL_INTERVAL_MS = 50;
 
 export async function runPipeline(
   config: PipelineConfig,
@@ -248,6 +265,11 @@ export async function runPipeline(
 
   function setTaskStatus(taskId: string, newStatus: TaskStatus): void {
     const state = states.get(taskId)!;
+    // Terminal lock: once a task reaches a terminal state it must not be
+    // re-transitioned. This prevents stop_all from marking running tasks as
+    // skipped and then having their in-flight processTask promise overwrite
+    // that with success/failed, producing an invalid double transition.
+    if (isTerminal(state.status)) return;
     const prevStatus = state.status;
     state.status = newStatus;
     // Snapshot state at emit time — result and finishedAt must be set before calling this for terminal statuses
@@ -280,9 +302,14 @@ export async function runPipeline(
 
   function applyStopAll(trackId: string): void {
     for (const [id, state] of states) {
-      if (state.trackConfig.id === trackId && !isTerminal(state.status)) {
-        setTaskStatus(id, 'skipped');
+      // Only skip tasks that are still waiting — tasks already running must be
+      // allowed to complete naturally so their process is not orphaned and their
+      // final status (success/failed/timeout) is recorded correctly.
+      // The terminal lock in setTaskStatus prevents any later re-transition
+      // should a completed running task try to overwrite the skipped state.
+      if (state.trackConfig.id === trackId && state.status === 'waiting') {
         state.finishedAt = nowISO();
+        setTaskStatus(id, 'skipped');
       }
     }
   }
@@ -385,9 +412,10 @@ export async function runPipeline(
       return;
     }
 
-    // 4. Mark running
-    setTaskStatus(taskId, 'running');
+    // 4. Mark running — set startedAt before emitting so subscribers see a
+    // complete snapshot (startedAt non-null) in the task_status_change event.
     state.startedAt = nowISO();
+    setTaskStatus(taskId, 'running');
     log.info(`[task:${taskId}]`, task.command ? `running: ${task.command}` : `running (driver task)`);
 
     // File-only: resolved config for this task
@@ -474,7 +502,8 @@ export async function runPipeline(
       // 6. Write output file with RAW stdout (preserves driver output format).
       // The separate normalizedMap holds canonical text for continue_from.
       if (task.output) {
-        const outPath = resolve(workDir, task.output);
+        // validatePath enforces no .. traversal and no absolute paths escaping workDir.
+        const outPath = validatePath(task.output, workDir);
         await mkdir(dirname(outPath), { recursive: true });
         await Bun.write(outPath, result.stdout);
         result = { ...result, outputPath: outPath };
@@ -592,7 +621,7 @@ export async function runPipeline(
       if (running.size === 0) {
         // Nothing in-flight but non-terminal tasks exist (e.g. trigger-wait states
         // that processTask hasn't been called for yet). Poll briefly.
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
       } else {
         // Wait for any one task to finish, then re-scan for new launchables.
         await Promise.race(running.values());
@@ -674,7 +703,7 @@ export async function runPipeline(
     // Prune old per-run log directories on every exit path (normal, blocked, or thrown).
     // Exclude the current runId so a concurrent run cannot delete its own live directory.
     if (maxLogRuns > 0) {
-      await pruneLogDirs(resolve(workDir, 'logs'), maxLogRuns, runId);
+      await pruneLogDirs(resolve(workDir, '.tagma', 'logs'), maxLogRuns, runId);
     }
   }
 }

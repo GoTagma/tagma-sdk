@@ -109,7 +109,8 @@ export class PipelineRunner {
    */
   getStates(): ReadonlyMap<string, TaskState> | null {
     if (this._states) return this._states;
-    if (this._statesMirror.size > 0) return this._statesMirror;
+    // Return a snapshot copy so callers cannot mutate SDK-internal state.
+    if (this._statesMirror.size > 0) return new Map([...this._statesMirror]);
     return null;
   }
 
