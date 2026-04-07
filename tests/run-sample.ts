@@ -55,6 +55,7 @@ interface ExpectedSummary {
 }
 
 type ApprovalStrategy = 'approve' | 'reject' | 'none';
+type Platform = 'win32' | 'linux' | 'darwin';
 
 interface CaseConfig {
   readonly expectedSuccess: boolean;
@@ -64,6 +65,12 @@ interface CaseConfig {
   readonly signalCancelAfterMs?: number;
   /** Extra paths to remove during workspace cleanup (relative to workDir). */
   readonly extraClean?: readonly string[];
+  /**
+   * Which platforms this case runs on.
+   * - `'all'` (default) — every platform
+   * - A single platform string or an array of platforms
+   */
+  readonly platforms?: 'all' | Platform | readonly Platform[];
 }
 
 const CASE_CONFIGS: Record<CaseName, CaseConfig> = {
@@ -502,6 +509,42 @@ pipeline:
   assert('runner abort: task timed out', abortRes.summary.timeout, 1);
 }
 
+// ═══ Platform Filtering ═══
+
+const CURRENT_PLATFORM = process.platform as Platform;
+
+function caseMatchesPlatform(cfg: CaseConfig, platform: Platform): boolean {
+  const p = cfg.platforms ?? 'all';
+  if (p === 'all') return true;
+  if (typeof p === 'string') return p === platform;
+  return p.includes(platform);
+}
+
+function parsePlatformFlag(args: string[]): Platform {
+  const idx = args.indexOf('--platform');
+  if (idx === -1 || idx + 1 >= args.length) return CURRENT_PLATFORM;
+  const value = args[idx + 1]!;
+  if (value === 'win32' || value === 'linux' || value === 'darwin') return value;
+  console.error(`Unknown platform "${value}". Expected: win32, linux, darwin`);
+  process.exit(1);
+}
+
+function filterByPlatform(cases: readonly CaseName[], platform: Platform): CaseName[] {
+  const result: CaseName[] = [];
+  const skipped: CaseName[] = [];
+  for (const name of cases) {
+    if (caseMatchesPlatform(CASE_CONFIGS[name], platform)) {
+      result.push(name);
+    } else {
+      skipped.push(name);
+    }
+  }
+  if (skipped.length > 0) {
+    console.log(`[platform=${platform}] skipping ${skipped.length} case(s): ${skipped.join(', ')}`);
+  }
+  return result;
+}
+
 // ═══ Usage & Main ═══
 
 function usage(): never {
@@ -513,12 +556,18 @@ function usage(): never {
   bun tests/run-sample.ts --extras         # PipelineRunner + onEvent smoke
   bun tests/run-sample.ts <case> [cases...]
 
+Options:
+  --platform <win32|linux|darwin>   Override platform detection (default: auto)
+
+Platform: ${CURRENT_PLATFORM} (auto-detected)
+
 Local-only cases:
   01-command-smoke  02-manual-ignore  03-stopall-timeout  04-pipeline-timeout
   07-hook-gate-pipeline  08-hook-gate-task  09-skip-downstream
   10-manual-reject  11-manual-timeout  12-exit-code-variants
   13-file-exists-variants  14-file-trigger-exists  15-hook-array
   16-cwd-override  18-signal-cancel  19-ignore-cross-track  20-track-cwd
+  22-file-trigger-change
 
 AI cases (require claude-code / codex):
   05-claude-haiku  06-codex-plugin  17-track-middlewares
@@ -543,11 +592,15 @@ async function main(): Promise<void> {
   const args = Bun.argv.slice(2);
   if (args.length === 0) usage();
 
+  const platform = parsePlatformFlag(args);
+  console.log(`[platform] ${platform}${platform !== CURRENT_PLATFORM ? ` (override, actual: ${CURRENT_PLATFORM})` : ''}`);
+
   // Bootstrap built-ins once
   bootstrapBuiltins();
 
   if (args.includes('--list')) {
-    console.log(CASES.join('\n'));
+    const visible = filterByPlatform([...CASES], platform);
+    console.log(visible.join('\n'));
     return;
   }
 
@@ -569,8 +622,21 @@ async function main(): Promise<void> {
   } else if (args.includes('--ai')) {
     selected = [...AI_CASES];
   } else {
-    selected = args.filter(isCaseName);
+    // Strip --platform and its value from positional args
+    const platformIdx = args.indexOf('--platform');
+    const stripped = platformIdx === -1
+      ? args
+      : [...args.slice(0, platformIdx), ...args.slice(platformIdx + 2)];
+    selected = stripped.filter(isCaseName);
     if (selected.length === 0) usage();
+  }
+
+  // Filter by platform
+  selected = filterByPlatform(selected, platform);
+
+  if (selected.length === 0) {
+    console.log('No cases to run on this platform.');
+    return;
   }
 
   for (const name of selected) {
