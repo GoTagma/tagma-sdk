@@ -1,0 +1,2 @@
+The token required by this smoke test is TAGMA_CLAUDE_CONTEXT_OK.
+Return exactly the token requested by the task prompt.

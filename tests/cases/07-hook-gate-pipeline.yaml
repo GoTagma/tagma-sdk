@@ -1,0 +1,14 @@
+pipeline:
+  name: 07-hook-gate-pipeline
+  timeout: 10s
+  hooks:
+    # fail.ts exits with code 1 → pipeline_start gate triggers → pipeline blocked
+    pipeline_start: bun ../../helpers/fail.ts 1 PIPELINE_GATE_BLOCK
+    pipeline_error: bun ../../helpers/hook-log.ts 07-hook-gate-pipeline
+  tracks:
+    - id: main
+      name: Main Track
+      tasks:
+        - id: should_not_run
+          name: This task must never execute
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/must-not-exist.txt MUST_NOT_EXIST

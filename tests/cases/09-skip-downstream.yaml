@@ -1,0 +1,35 @@
+pipeline:
+  name: 09-skip-downstream
+  timeout: 10s
+  hooks:
+    task_failure: bun ../../helpers/hook-log.ts 09-skip-downstream
+    pipeline_complete: bun ../../helpers/hook-log.ts 09-skip-downstream
+  tracks:
+    - id: main_track
+      name: Main Track (explicit skip_downstream)
+      on_failure: skip_downstream
+      tasks:
+        - id: fail_first
+          name: Fails intentionally
+          command: bun ../../helpers/fail.ts 1 EXPECTED_FAIL
+
+        - id: skipped_dep
+          name: Direct downstream — skipped
+          command: bun ../../helpers/echo.ts SHOULD_SKIP_DIRECT
+          depends_on: [fail_first]
+
+        - id: skipped_transitive
+          name: Transitive downstream — also skipped
+          command: bun ../../helpers/echo.ts SHOULD_SKIP_TRANSITIVE
+          depends_on: [skipped_dep]
+
+    - id: parallel_track
+      name: Parallel Track (unaffected)
+      tasks:
+        - id: independent
+          name: Succeeds independently
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/skip-ds-ok.txt SKIP_DS_OK
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/skip-ds-ok.txt
+            kind: file

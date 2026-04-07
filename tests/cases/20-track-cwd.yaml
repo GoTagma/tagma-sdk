@@ -1,0 +1,35 @@
+pipeline:
+  name: 20-track-cwd
+  timeout: 10s
+  tracks:
+    - id: setup
+      name: Setup (creates sub-workspace from parent cwd)
+      tasks:
+        - id: create_dir
+          name: Create sub-workspace directory
+          command: bun ../../helpers/mkdir.ts sub-workspace
+
+    - id: track_with_cwd
+      name: Track with cwd override at track level
+      cwd: sub-workspace
+      tasks:
+        - id: write_file
+          name: Write file relative to track cwd (sub-workspace)
+          depends_on: [setup.create_dir]
+          command: bun ../../../helpers/write-file.ts track-cwd-output.txt TRACK_CWD_OK
+          completion:
+            type: file_exists
+            path: track-cwd-output.txt
+            kind: file
+
+    - id: verify
+      name: Verify from parent workDir perspective
+      tasks:
+        - id: verify_from_parent
+          name: File must exist at sub-workspace/track-cwd-output.txt (parent cwd)
+          depends_on: [track_with_cwd.write_file]
+          command: bun ../../helpers/echo.ts PARENT_VERIFY
+          completion:
+            type: file_exists
+            path: sub-workspace/track-cwd-output.txt
+            kind: file

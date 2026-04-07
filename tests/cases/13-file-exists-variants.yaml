@@ -1,0 +1,32 @@
+pipeline:
+  name: 13-file-exists-variants
+  timeout: 10s
+  tracks:
+    - id: variants
+      name: file_exists Completion Variants
+      tasks:
+        - id: create_dir
+          name: Create dir, check kind=dir
+          command: bun ../../helpers/mkdir.ts .tagma-tests/generated/test-dir
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/test-dir
+            kind: dir
+
+        - id: create_sized
+          name: Write 12-byte file, check min_size=8
+          command: bun ../../helpers/write-sized.ts .tagma-tests/generated/sized.txt 12
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/sized.txt
+            kind: file
+            min_size: 8
+
+        - id: kind_any_on_dir
+          name: kind=any matches a directory
+          command: bun ../../helpers/mkdir.ts .tagma-tests/generated/any-dir
+          depends_on: [create_dir]
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/any-dir
+            kind: any

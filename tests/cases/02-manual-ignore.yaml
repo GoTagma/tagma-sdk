@@ -1,0 +1,38 @@
+pipeline:
+  name: 02-manual-ignore
+  timeout: 20s
+  hooks:
+    task_start: bun ../../helpers/hook-log.ts 02-manual-ignore
+    task_success: bun ../../helpers/hook-log.ts 02-manual-ignore
+    task_failure: bun ../../helpers/hook-log.ts 02-manual-ignore
+    pipeline_complete: bun ../../helpers/hook-log.ts 02-manual-ignore
+  tracks:
+    - id: gate_and_ignore
+      name: Manual Gate And Ignore
+      on_failure: ignore
+      tasks:
+        - id: gated
+          name: Manual gate
+          trigger:
+            type: manual
+            message: Approve quick smoke test
+            options: [approve, reject]
+            timeout: 5s
+          command: bun ../../helpers/echo.ts MANUAL_TRIGGER_OK
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts MANUAL_TRIGGER_OK
+
+        - id: fail_but_continue
+          name: Intentional failure
+          command: bun ../../helpers/fail.ts 7 EXPECTED_IGNORE_FAILURE
+          depends_on: [gated]
+
+        - id: continue_after_fail
+          name: Continue after ignored failure
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/ignore-after-fail.txt IGNORE_FLOW_OK
+          depends_on: [fail_but_continue]
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/ignore-after-fail.txt
+            kind: file

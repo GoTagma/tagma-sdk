@@ -1,0 +1,27 @@
+pipeline:
+  name: 03-stopall-timeout
+  timeout: 20s
+  hooks:
+    task_failure: bun ../../helpers/hook-log.ts 03-stopall-timeout
+    pipeline_complete: bun ../../helpers/hook-log.ts 03-stopall-timeout
+  tracks:
+    - id: stopall_track
+      name: Stop All Track
+      on_failure: stop_all
+      tasks:
+        - id: fail_fast
+          name: Fail fast
+          command: bun ../../helpers/fail.ts 1 STOP_ALL_FAIL
+
+        - id: should_skip
+          name: Should be skipped by stop_all
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/should-not-exist.txt SHOULD_NOT_EXIST
+          depends_on: [fail_fast]
+
+    - id: timeout_track
+      name: Timeout Track
+      tasks:
+        - id: sleepy
+          name: Sleep until timeout
+          command: bun ../../helpers/sleep.ts 1500
+          timeout: 1s

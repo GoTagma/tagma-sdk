@@ -1,0 +1,30 @@
+pipeline:
+  name: 14-file-trigger-exists
+  timeout: 10s
+  tracks:
+    - id: write_first
+      name: Write trigger file first
+      tasks:
+        - id: writer
+          name: Write the file before trigger starts watching
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/pre-existing.txt PRE_EXISTING
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/pre-existing.txt
+            kind: file
+
+    - id: trigger_on_existing
+      name: Trigger on already-existing file
+      tasks:
+        - id: trigger_task
+          name: File trigger fires immediately via ready-event check
+          trigger:
+            type: file
+            path: .tagma-tests/generated/pre-existing.txt
+            timeout: 5s
+          depends_on: [write_first.writer]
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/triggered.txt TRIGGERED_OK
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/triggered.txt
+            kind: file

@@ -1,0 +1,43 @@
+pipeline:
+  name: 05-claude-haiku
+  timeout: 60s
+  hooks:
+    task_success: bun ../../helpers/hook-log.ts 05-claude-haiku
+    pipeline_complete: bun ../../helpers/hook-log.ts 05-claude-haiku
+  tracks:
+    - id: claude_smoke
+      name: Claude Haiku Smoke
+      driver: claude-code
+      model_tier: low
+      agent_profile: |
+        You are running a one-line smoke test.
+        Never explain. Never add extra text.
+      permissions:
+        read: true
+        write: false
+        execute: false
+      tasks:
+        - id: first
+          name: Claude first reply
+          prompt: |
+            Read the reference context and reply with exactly one line:
+            TAGMA_CLAUDE_CONTEXT_OK
+          middlewares:
+            - type: static_context
+              file: .tagma-tests/refs/claude-context.txt
+              label: Claude Smoke Context
+          output: .tagma-tests/output/claude-first.txt
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts TAGMA_CLAUDE_CONTEXT_OK
+
+        - id: handoff
+          name: Claude continue_from smoke
+          prompt: |
+            Continue the session and reply with exactly one line:
+            TAGMA_CLAUDE_HANDOFF_OK
+          continue_from: first
+          depends_on: [first]
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts TAGMA_CLAUDE_HANDOFF_OK

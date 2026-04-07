@@ -1,0 +1,17 @@
+pipeline:
+  name: 11-manual-timeout
+  timeout: 10s
+  hooks:
+    task_failure: bun ../../helpers/hook-log.ts 11-manual-timeout
+    pipeline_complete: bun ../../helpers/hook-log.ts 11-manual-timeout
+  tracks:
+    - id: timeout_track
+      name: Timeout Track
+      tasks:
+        - id: no_decision
+          name: Manual trigger — nobody responds → timeout after 1s
+          trigger:
+            type: manual
+            message: No one will respond to this request
+            timeout: 1s
+          command: bun ../../helpers/echo.ts SHOULD_NOT_RUN_TIMEOUT

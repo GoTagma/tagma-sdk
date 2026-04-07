@@ -1,0 +1,26 @@
+pipeline:
+  name: 19-ignore-cross-track
+  timeout: 10s
+  hooks:
+    task_failure: bun ../../helpers/hook-log.ts 19-ignore-cross-track
+    pipeline_complete: bun ../../helpers/hook-log.ts 19-ignore-cross-track
+  tracks:
+    - id: failing_track
+      name: Failing Track (on_failure=ignore)
+      on_failure: ignore
+      tasks:
+        - id: fail_task
+          name: Fails but track ignores failures
+          command: bun ../../helpers/fail.ts 1 CROSS_TRACK_FAIL
+
+    - id: dependent_track
+      name: Dependent Track (cross-track dep on ignored failure)
+      tasks:
+        - id: cross_dep
+          name: Depends on failing_track.fail_task — runs because ignore propagates cross-track
+          depends_on: [failing_track.fail_task]
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/cross-ignore.txt CROSS_IGNORE_OK
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/cross-ignore.txt
+            kind: file

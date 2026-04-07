@@ -1,0 +1,29 @@
+pipeline:
+  name: 16-cwd-override
+  timeout: 10s
+  tracks:
+    - id: main
+      name: Main
+      tasks:
+        - id: setup_subdir
+          name: Create the sub-workspace directory
+          command: bun ../../helpers/mkdir.ts sub-workspace
+
+        - id: write_in_subdir
+          name: Write file relative to overridden cwd
+          cwd: sub-workspace
+          depends_on: [setup_subdir]
+          command: bun ../../../helpers/write-file.ts output/from-sub.txt CWD_OVERRIDE_OK
+          completion:
+            type: file_exists
+            path: output/from-sub.txt
+            kind: file
+
+        - id: verify_from_workdir
+          name: Verify the file from workDir perspective
+          depends_on: [write_in_subdir]
+          command: bun ../../helpers/echo.ts VERIFY_OK
+          completion:
+            type: file_exists
+            path: sub-workspace/output/from-sub.txt
+            kind: file

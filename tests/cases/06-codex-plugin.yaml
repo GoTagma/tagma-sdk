@@ -1,0 +1,42 @@
+pipeline:
+  name: 06-codex-plugin
+  timeout: 60s
+  plugins:
+    - "@tagma/driver-codex"
+  hooks:
+    task_success: bun ../../helpers/hook-log.ts 06-codex-plugin
+    pipeline_complete: bun ../../helpers/hook-log.ts 06-codex-plugin
+  tracks:
+    - id: codex_smoke
+      name: Codex Plugin Smoke
+      driver: codex
+      model_tier: low
+      agent_profile: |
+        You are running a one-line smoke test.
+        Never explain. Never add extra text.
+      permissions:
+        read: true
+        write: false
+        execute: false
+      tasks:
+        - id: first
+          name: Codex first reply
+          prompt: |
+            Reply with exactly one line:
+            TAGMA_CODEX_FIRST_OK
+          output: .tagma-tests/output/codex-first.txt
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts TAGMA_CODEX_FIRST_OK
+
+        - id: handoff
+          name: Codex continue_from via output handoff
+          prompt: |
+            Read the previous output and reply with exactly one line:
+            TAGMA_CODEX_HANDOFF_OK
+          continue_from: first
+          depends_on: [first]
+          output: .tagma-tests/output/codex-handoff.txt
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts TAGMA_CODEX_HANDOFF_OK

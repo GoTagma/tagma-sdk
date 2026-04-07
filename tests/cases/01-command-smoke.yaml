@@ -1,0 +1,51 @@
+pipeline:
+  name: 01-command-smoke
+  timeout: 20s
+  hooks:
+    pipeline_start: bun ../../helpers/hook-log.ts 01-command-smoke
+    task_start: bun ../../helpers/hook-log.ts 01-command-smoke
+    task_success: bun ../../helpers/hook-log.ts 01-command-smoke
+    pipeline_complete: bun ../../helpers/hook-log.ts 01-command-smoke
+  tracks:
+    - id: prep
+      name: Prepare Files
+      tasks:
+        - id: write_context
+          name: Write context file
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/context.txt COMMAND_SMOKE_OK
+          output: .tagma-tests/output/write-context.txt
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/context.txt
+            kind: file
+
+        - id: create_trigger
+          name: Create file trigger
+          command: bun ../../helpers/sleep-then-write.ts 150 .tagma-tests/generated/trigger.txt FILE_TRIGGER_OK
+          completion:
+            type: exit_code
+            expect: 0
+
+    - id: verify
+      name: Verify Trigger And Output
+      tasks:
+        - id: wait_for_file
+          name: Wait for trigger file
+          trigger:
+            type: file
+            path: .tagma-tests/generated/trigger.txt
+            timeout: 5s
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/verified.txt VERIFIED_BY_FILE_TRIGGER
+          depends_on: [prep.write_context]
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/verified.txt
+            kind: file
+
+        - id: grep_output
+          name: Output check smoke
+          command: bun ../../helpers/echo.ts COMMAND_SMOKE_OUTPUT
+          depends_on: [wait_for_file]
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts COMMAND_SMOKE_OUTPUT

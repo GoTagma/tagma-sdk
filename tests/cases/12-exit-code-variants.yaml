@@ -1,0 +1,21 @@
+pipeline:
+  name: 12-exit-code-variants
+  timeout: 10s
+  tracks:
+    - id: variants
+      name: Exit Code Completion Variants
+      # Tasks are independent (no deps) — both run regardless of each other
+      tasks:
+        - id: array_expect_match
+          name: exit 0, expect [0,1] → success (array form)
+          command: bun ../../helpers/echo.ts ARRAY_EXPECT_OK
+          completion:
+            type: exit_code
+            expect: [0, 1]
+
+        - id: nonzero_expect_miss
+          name: exit 0, expect 5 → failed (completion gate rejects)
+          command: bun ../../helpers/echo.ts NONZERO_MISS
+          completion:
+            type: exit_code
+            expect: 5

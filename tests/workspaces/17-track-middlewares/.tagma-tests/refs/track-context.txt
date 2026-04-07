@@ -1,0 +1,5 @@
+This is the shared track-level context injected by the static_context middleware.
+The two expected reply tokens are:
+  - TRACK_MW_TASK_A_OK  (for the first task)
+  - TRACK_MW_TASK_B_OK  (for the second task)
+Return exactly the token the task prompt requests. No other text.

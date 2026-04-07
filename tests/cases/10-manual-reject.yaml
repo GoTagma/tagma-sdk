@@ -1,0 +1,18 @@
+pipeline:
+  name: 10-manual-reject
+  timeout: 10s
+  hooks:
+    task_failure: bun ../../helpers/hook-log.ts 10-manual-reject
+    pipeline_complete: bun ../../helpers/hook-log.ts 10-manual-reject
+  tracks:
+    - id: reject_track
+      name: Reject Track
+      tasks:
+        - id: rejected
+          name: Rejected by gateway → blocked
+          trigger:
+            type: manual
+            message: This will be auto-rejected by the test runner
+            options: [approve, reject]
+            timeout: 5s
+          command: bun ../../helpers/echo.ts SHOULD_NOT_RUN_REJECTED

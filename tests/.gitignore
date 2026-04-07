@@ -1,0 +1,4 @@
+workspaces/**/.tagma/
+workspaces/**/.tagma-tests/generated/
+workspaces/**/.tagma-tests/output/
+workspaces/**/.tagma-tests/hook-events.log

@@ -1,0 +1,40 @@
+pipeline:
+  name: 17-track-middlewares
+  timeout: 60s
+  tracks:
+    - id: shared_ctx_track
+      name: Track with shared static_context middleware
+      driver: claude-code
+      model_tier: low
+      agent_profile: |
+        You are running a one-line smoke test.
+        Never explain. Never add extra text.
+        Reply with exactly the token the task prompt requests.
+      permissions:
+        read: true
+        write: false
+        execute: false
+      middlewares:
+        - type: static_context
+          file: .tagma-tests/refs/track-context.txt
+          label: Shared Track Context
+      tasks:
+        - id: task_a
+          name: First task — inherits track-level middleware
+          prompt: |
+            Using the provided context, reply with exactly one line:
+            TRACK_MW_TASK_A_OK
+          output: .tagma-tests/output/track-mw-a.txt
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts TRACK_MW_TASK_A_OK
+
+        - id: task_b
+          name: Second task — also inherits track-level middleware, no per-task middlewares
+          prompt: |
+            Using the provided context, reply with exactly one line:
+            TRACK_MW_TASK_B_OK
+          depends_on: [task_a]
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts TRACK_MW_TASK_B_OK

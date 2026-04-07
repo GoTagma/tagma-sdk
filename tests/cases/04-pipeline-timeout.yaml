@@ -1,0 +1,13 @@
+pipeline:
+  name: 04-pipeline-timeout
+  timeout: 1s
+  hooks:
+    pipeline_start: bun ../../helpers/hook-log.ts 04-pipeline-timeout
+    pipeline_error: bun ../../helpers/hook-log.ts 04-pipeline-timeout
+  tracks:
+    - id: pipeline_timeout
+      name: Pipeline Timeout
+      tasks:
+        - id: long_task
+          name: Long task
+          command: bun ../../helpers/sleep.ts 2000

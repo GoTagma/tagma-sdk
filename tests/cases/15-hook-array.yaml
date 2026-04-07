@@ -1,0 +1,18 @@
+pipeline:
+  name: 15-hook-array
+  timeout: 10s
+  hooks:
+    task_success:
+      - bun ../../helpers/hook-log.ts 15-hook-array
+      - bun ../../helpers/hook-count.ts .tagma-tests/generated/hook-count.txt
+    pipeline_complete: bun ../../helpers/hook-log.ts 15-hook-array
+  tracks:
+    - id: main
+      name: Main
+      tasks:
+        - id: success_task
+          name: Triggers both array hook commands on success
+          command: bun ../../helpers/echo.ts HOOK_ARRAY_OK
+          completion:
+            type: output_check
+            check: bun ../../helpers/check-stdin-contains.ts HOOK_ARRAY_OK

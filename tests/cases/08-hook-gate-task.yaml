@@ -1,0 +1,32 @@
+pipeline:
+  name: 08-hook-gate-task
+  timeout: 10s
+  hooks:
+    # hook-gate exits 1 only for tasks whose id ends with ".blocked_task"
+    task_start: bun ../../helpers/hook-gate.ts blocked_task
+    task_failure: bun ../../helpers/hook-log.ts 08-hook-gate-task
+    pipeline_complete: bun ../../helpers/hook-log.ts 08-hook-gate-task
+  tracks:
+    - id: gate_track
+      name: Gate Track
+      # on_failure: skip_downstream is the default — blocked_task blocked → downstream skipped
+      tasks:
+        - id: blocked_task
+          name: Blocked by task_start hook
+          command: bun ../../helpers/echo.ts SHOULD_NOT_PRINT
+
+        - id: downstream
+          name: Skipped because blocked_task is blocked
+          command: bun ../../helpers/echo.ts DOWNSTREAM_SHOULD_SKIP
+          depends_on: [blocked_task]
+
+    - id: parallel_track
+      name: Parallel Track (not affected by gate)
+      tasks:
+        - id: independent
+          name: Runs fine — hook allows it
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/independent.txt INDEPENDENT_OK
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/independent.txt
+            kind: file
