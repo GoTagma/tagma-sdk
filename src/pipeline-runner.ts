@@ -129,10 +129,10 @@ function snapshotStates(src: ReadonlyMap<string, TaskState>): ReadonlyMap<string
   const copy = new Map<string, TaskState>();
   for (const [id, s] of src) {
     copy.set(id, {
-      config: s.config,
-      trackConfig: s.trackConfig,
+      config: { ...s.config },
+      trackConfig: { ...s.trackConfig },
       status: s.status,
-      result: s.result,
+      result: s.result ? { ...s.result } : null,
       startedAt: s.startedAt,
       finishedAt: s.finishedAt,
     });

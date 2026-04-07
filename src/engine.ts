@@ -750,10 +750,10 @@ function freezeStates(states: Map<string, TaskState>): ReadonlyMap<string, TaskS
   const copy = new Map<string, TaskState>();
   for (const [id, s] of states) {
     copy.set(id, {
-      config: s.config,
-      trackConfig: s.trackConfig,
+      config: { ...s.config },
+      trackConfig: { ...s.trackConfig },
       status: s.status,
-      result: s.result,
+      result: s.result ? { ...s.result } : null,
       startedAt: s.startedAt,
       finishedAt: s.finishedAt,
     });
