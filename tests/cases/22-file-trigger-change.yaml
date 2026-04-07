@@ -1,0 +1,36 @@
+pipeline:
+  name: 22-file-trigger-change
+  timeout: 10s
+  tracks:
+    # Track A: create the file, wait, then overwrite it (triggers 'change' event)
+    - id: writer
+      name: Write and then overwrite the trigger file
+      tasks:
+        - id: create
+          name: Create initial file
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/watched.txt INITIAL
+
+        - id: overwrite
+          name: Overwrite with new content after delay
+          command: bun ../../helpers/sleep-then-write.ts 500 .tagma-tests/generated/watched.txt CHANGED
+          depends_on: [create]
+
+    # Track B: trigger watches the file — fires on 'change' when overwrite lands
+    # depends_on writer.create ensures watcher starts after the file already exists,
+    # so the initial ready-event is expected. The key test: even if ready fires first,
+    # the pipeline still works. And if timing causes ready to miss, 'change' catches it.
+    - id: reactor
+      name: React to file change
+      tasks:
+        - id: wait_change
+          name: File trigger fires on modification
+          trigger:
+            type: file
+            path: .tagma-tests/generated/watched.txt
+            timeout: 8s
+          depends_on: [writer.create]
+          command: bun ../../helpers/write-file.ts .tagma-tests/generated/reacted.txt CHANGE_DETECTED
+          completion:
+            type: file_exists
+            path: .tagma-tests/generated/reacted.txt
+            kind: file

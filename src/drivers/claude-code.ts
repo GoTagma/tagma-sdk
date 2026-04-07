@@ -151,23 +151,27 @@ export const ClaudeCodeDriver: DriverPlugin = {
     const tools = resolveTools(permissions);
     const permissionMode = resolvePermissionMode(permissions);
 
+    // Pass the prompt via stdin instead of as a -p argument value. On Windows,
+    // multi-line strings in CLI arguments break cmd.exe argument parsing when
+    // the executable is a .cmd wrapper — newlines cause all subsequent flags
+    // (--output-format, --model, etc.) to be silently dropped.
+    const stdin = task.prompt!;
+
     const args: string[] = [
       'claude',
-      '-p', task.prompt!,
+      '-p',  // no value — prompt is piped via stdin
       '--model', model,
       '--allowedTools', tools,
       '--permission-mode', permissionMode,
       '--output-format', 'json',
-      '--verbose',
+      // NOTE: do NOT use --verbose here. It changes stdout from a single JSON
+      // result object to a JSON event-stream array, breaking parseResult's
+      // session_id extraction (needed for continue_from) and normalizedOutput.
+      // The engine already captures stdout/stderr for pipeline logs.
       // Pin to project+local settings only; don't inherit arbitrary user-level
       // config (hooks, MCP servers, etc.) into pipeline automation.
       '--setting-sources', 'project,local',
     ];
-
-    const profile = task.agent_profile ?? track.agent_profile;
-    if (profile) {
-      args.push('--append-system-prompt', profile);
-    }
 
     // If the task runs in a subdirectory of the project, grant read/edit
     // access to the project root via --add-dir so Claude can still see
@@ -185,12 +189,29 @@ export const ClaudeCodeDriver: DriverPlugin = {
       }
     }
 
-    return { args, cwd: effectiveCwd, env: resolveGitBashEnv() };
+    // --append-system-prompt MUST be last: its value may contain newlines,
+    // and on Windows cmd.exe can silently drop any flags that follow a
+    // newline-containing argument.
+    const profile = task.agent_profile ?? track.agent_profile;
+    if (profile) {
+      args.push('--append-system-prompt', profile);
+    }
+
+    return { args, cwd: effectiveCwd, env: resolveGitBashEnv(), stdin };
   },
 
   parseResult(stdout: string): DriverResultMeta {
     try {
-      const json = JSON.parse(stdout);
+      let json = JSON.parse(stdout);
+
+      // --verbose produces a JSON array of events; extract the final "result"
+      // event so session_id and normalizedOutput are correctly populated.
+      if (Array.isArray(json)) {
+        const resultEvent = json.findLast((e: Record<string, unknown>) => e.type === 'result');
+        if (!resultEvent) return { normalizedOutput: stdout };
+        json = resultEvent;
+      }
+
       // Extract canonical text: strip JSON envelope so downstream drivers
       // get the actual AI response, not metadata
       const normalizedOutput = json.result ?? json.text ?? json.content ?? stdout;

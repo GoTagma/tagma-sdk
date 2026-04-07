@@ -6,6 +6,24 @@ import { shellArgs } from './utils';
 // Delay before escalating SIGTERM to SIGKILL when killing a timed-out process.
 const SIGKILL_DELAY_MS = 3_000;
 
+/**
+ * On Windows, proc.kill('SIGTERM') / proc.kill('SIGKILL') only terminate the
+ * direct child process. When the child is a .cmd/.bat wrapper (e.g. claude.cmd),
+ * cmd.exe spawns the real process as a grandchild — proc.kill misses it entirely.
+ * `taskkill /F /T /PID` kills the entire process tree rooted at the given PID.
+ */
+function killProcessTree(pid: number): void {
+  if (process.platform !== 'win32') return;
+  try {
+    Bun.spawnSync(['taskkill', '/F', '/T', '/PID', String(pid)], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+  } catch {
+    /* best-effort — process may have already exited */
+  }
+}
+
 export interface RunOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal; // pipeline-level abort
@@ -128,15 +146,22 @@ export async function runSpawn(
   const killGracefully = () => {
     if (killedByUs) return;
     killedByUs = true;
-    proc.kill('SIGTERM');
-    // If the child ignores SIGTERM, escalate to SIGKILL after 3 s.
-    forceTimer = setTimeout(() => {
-      try {
-        proc.kill('SIGKILL');
-      } catch {
-        /* already exited */
-      }
-    }, SIGKILL_DELAY_MS);
+
+    if (process.platform === 'win32') {
+      // On Windows, kill the entire process tree via taskkill. This handles
+      // .cmd wrappers and nested child processes that proc.kill() misses.
+      killProcessTree(proc.pid);
+    } else {
+      proc.kill('SIGTERM');
+      // If the child ignores SIGTERM, escalate to SIGKILL after 3 s.
+      forceTimer = setTimeout(() => {
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          /* already exited */
+        }
+      }, SIGKILL_DELAY_MS);
+    }
   };
 
   if (timeoutMs && timeoutMs > 0) {

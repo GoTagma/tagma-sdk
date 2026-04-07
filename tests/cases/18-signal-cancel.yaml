@@ -1,0 +1,14 @@
+pipeline:
+  name: 18-signal-cancel
+  timeout: 30s
+  tracks:
+    - id: long_tasks
+      name: Long Running Tasks (cancelled by external signal)
+      tasks:
+        - id: long_a
+          name: Sleeps 2s — cancelled mid-run
+          command: bun ../../helpers/sleep.ts 2000
+
+        - id: long_b
+          name: Also sleeps 2s — cancelled mid-run
+          command: bun ../../helpers/sleep.ts 2000
