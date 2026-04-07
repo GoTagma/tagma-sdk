@@ -64,37 +64,216 @@ console.log(result.success ? 'Done' : 'Failed');
 
 ## Pipeline YAML Reference
 
+### Full Structure
+
 ```yaml
 pipeline:
   name: my-pipeline
-  driver: claude-code          # default driver for all tasks
-  timeout: 30m                 # pipeline-level timeout
-  plugins:                     # load external driver plugins
+  driver: claude-code
+  timeout: 30m
+  plugins:
     - "@tagma/driver-codex"
   hooks:
     pipeline_start: "echo starting"
+    task_start: "echo task begin"
+    task_success: "echo task ok"
     task_failure: "notify-slack.sh"
+    pipeline_complete: "echo done"
+    pipeline_error: "alert.sh"
   tracks:
     - id: track-1
       name: Track One
-      model_tier: high          # high | medium | low
+      color: "#3b82f6"
+      driver: claude-code
+      model_tier: high
+      agent_profile: senior
+      cwd: ./services/backend
       permissions:
         read: true
         write: true
         execute: false
-      on_failure: skip_downstream  # skip_downstream | stop_all | ignore
+      on_failure: skip_downstream
+      middlewares:
+        - type: static_context
+          file: ./context.md
+          label: Architecture Guide
       tasks:
         - id: task-a
           name: Do something
           prompt: "Your prompt here"
           output: ./output/task-a.txt
           timeout: 10m
+          driver: claude-code
+          model_tier: high
+          agent_profile: senior
+          cwd: ./src
+          permissions:
+            read: true
+            write: true
+            execute: false
+          middlewares:
+            - type: static_context
+              file: ./ref.md
+          trigger:
+            type: manual
+            message: "Approve before running"
+            options: [approve, reject]
+            timeout: 5m
+          completion:
+            type: exit_code
+            expect: 0
         - id: task-b
           name: Follow up
           prompt: "Continue the work"
           continue_from: task-a
           depends_on: [task-a]
+        - id: task-c
+          name: Templated task
+          use: "@tagma/template-lint"
+          with:
+            src: ./src
 ```
+
+### Pipeline Fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | Yes | Pipeline name, used in logs and run IDs |
+| `driver` | `string` | No | Default driver for all tracks/tasks (inherited). Built-in: `claude-code` |
+| `timeout` | `string` | No | Pipeline-level timeout. Format: `"30s"`, `"5m"`, `"2h"` |
+| `plugins` | `string[]` | No | External plugin packages to load, e.g. `["@tagma/driver-codex"]` |
+| `hooks` | `HooksConfig` | No | Shell commands to run at lifecycle events (see Hooks below) |
+| `tracks` | `TrackConfig[]` | Yes | List of parallel execution tracks |
+
+### Hooks Fields
+
+Each hook value can be a single command string or an array of commands.
+
+| Field | Type | Description |
+|---|---|---|
+| `pipeline_start` | `string \| string[]` | Runs when the pipeline begins |
+| `task_start` | `string \| string[]` | Runs before each task starts |
+| `task_success` | `string \| string[]` | Runs after a task succeeds |
+| `task_failure` | `string \| string[]` | Runs after a task fails |
+| `pipeline_complete` | `string \| string[]` | Runs when the pipeline finishes successfully |
+| `pipeline_error` | `string \| string[]` | Runs when the pipeline finishes with errors |
+
+### Track Fields
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `id` | `string` | Yes | — | Unique track identifier |
+| `name` | `string` | Yes | — | Display name |
+| `color` | `string` | No | — | Color hint for UI rendering (e.g. `"#3b82f6"`) |
+| `driver` | `string` | No | Inherited from pipeline | Driver for all tasks in this track |
+| `model_tier` | `string` | No | Inherited from pipeline | AI model tier: `high`, `medium`, `low` |
+| `agent_profile` | `string` | No | — | Named agent configuration profile |
+| `cwd` | `string` | No | Pipeline workDir | Working directory for tasks in this track (relative path) |
+| `permissions` | `Permissions` | No | Inherited from pipeline | Default permissions for tasks (see Permissions) |
+| `on_failure` | `OnFailure` | No | `skip_downstream` | Failure strategy: `skip_downstream`, `stop_all`, `ignore` |
+| `middlewares` | `MiddlewareConfig[]` | No | — | Middlewares applied to all tasks (task-level overrides track-level) |
+| `tasks` | `TaskConfig[]` | Yes | — | Ordered list of tasks in this track |
+
+### Task Fields
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `id` | `string` | Yes | — | Unique task identifier (unique within the pipeline) |
+| `name` | `string` | No | — | Display name |
+| `prompt` | `string` | No* | — | AI prompt to send to the driver. *Mutually exclusive with `command` |
+| `command` | `string` | No* | — | Shell command to execute directly. *Mutually exclusive with `prompt` |
+| `depends_on` | `string[]` | No | — | Task IDs that must complete before this task runs. Cross-track refs use `trackId.taskId` |
+| `continue_from` | `string` | No | — | Task ID whose output/session to continue from (session handoff). Cross-track refs use `trackId.taskId` |
+| `output` | `string` | No | — | File path to write task stdout to (relative to workDir) |
+| `driver` | `string` | No | Inherited from track | Driver override for this task |
+| `model_tier` | `string` | No | Inherited from track | Model tier override for this task |
+| `agent_profile` | `string` | No | Inherited from track | Agent profile override |
+| `cwd` | `string` | No | Inherited from track | Working directory override (relative path) |
+| `timeout` | `string` | No | — | Task-level timeout. Format: `"30s"`, `"5m"`, `"2h"` |
+| `permissions` | `Permissions` | No | Inherited from track | Permission override (see Permissions) |
+| `middlewares` | `MiddlewareConfig[]` | No | Inherited from track | Middleware override. Set `[]` to disable inherited middlewares |
+| `trigger` | `TriggerConfig` | No | — | Gate that must resolve before the task runs (see Triggers) |
+| `completion` | `CompletionConfig` | No | — | Post-execution check to validate task output (see Completions) |
+| `use` | `string` | No | — | Template package to expand (e.g. `"@tagma/template-lint"`). Mutually exclusive with `prompt`/`command` |
+| `with` | `Record<string, unknown>` | No | — | Parameters passed to the template referenced by `use` |
+
+### Permissions
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `read` | `boolean` | — | Allow the agent to read files |
+| `write` | `boolean` | — | Allow the agent to write files |
+| `execute` | `boolean` | — | Allow the agent to execute commands |
+
+### Inheritance
+
+Fields are inherited top-down: **pipeline → track → task**. A value set at a lower level overrides the inherited value.
+
+Inherited fields: `driver`, `model_tier`, `permissions`, `cwd`, `middlewares`.
+
+Track-level `middlewares` apply to all tasks in the track. Setting task-level `middlewares` **replaces** (not appends) the track-level list. Use `middlewares: []` to disable all inherited middlewares for a task.
+
+---
+
+### Built-in Triggers
+
+#### `manual` — Human approval gate
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | `"manual"` | Yes | — | Trigger type |
+| `message` | `string` | No | `"Manual confirmation required for task \"{taskId}\""` | Message shown to the approver |
+| `options` | `string[]` | No | — | Choice options (e.g. `[approve, reject]`) |
+| `timeout` | `string` | No | — | How long to wait for a decision before timing out |
+| `metadata` | `object` | No | — | Arbitrary metadata passed to the approval gateway |
+
+#### `file` — File watcher gate
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | `"file"` | Yes | — | Trigger type |
+| `path` | `string` | Yes | — | File path to watch (relative to workDir) |
+| `timeout` | `string` | No | — | How long to wait for the file to appear/change |
+
+---
+
+### Built-in Completions
+
+#### `exit_code` — Exit code check
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | `"exit_code"` | Yes | — | Completion type |
+| `expect` | `number \| number[]` | No | `0` | Expected exit code(s). Pass an array for multiple acceptable codes |
+
+#### `file_exists` — File existence check
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | `"file_exists"` | Yes | — | Completion type |
+| `path` | `string` | Yes | — | File or directory path to check (relative to workDir) |
+| `kind` | `"file" \| "dir" \| "any"` | No | `"any"` | Entity type constraint |
+| `min_size` | `number` | No | — | Minimum file size in bytes (files only) |
+
+#### `output_check` — Command-based output validation
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | `"output_check"` | Yes | — | Completion type |
+| `check` | `string` | Yes | — | Shell command to run. Task stdout is piped to its stdin; exits 0 = pass |
+| `timeout` | `string` | No | `"30s"` | Max time to wait for the check command |
+
+---
+
+### Built-in Middlewares
+
+#### `static_context` — Prepend file content to prompt
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | `"static_context"` | Yes | — | Middleware type |
+| `file` | `string` | Yes | — | Path to the context file (relative to workDir) |
+| `label` | `string` | No | `"Reference: {filename}"` | Label for the injected context section |
 
 ## API
 
