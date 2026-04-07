@@ -150,6 +150,32 @@ Properties:
 
 Dynamically loads and registers external plugin packages.
 
+### `registerPlugin(category, type, handler): void`
+
+Registers a plugin handler manually. Idempotent — duplicate registrations are silently ignored.
+
+### `getHandler(category, type): PluginType`
+
+Retrieves a registered plugin handler. Throws if the plugin is not registered.
+
+### `hasHandler(category, type): boolean`
+
+Returns `true` if a handler is registered for the given category and type.
+
+### `listRegistered(category): string[]`
+
+Lists all registered handler type names for a plugin category (`'drivers'`, `'triggers'`, `'completions'`, `'middlewares'`).
+
+### `resolveConfig(raw: RawPipelineConfig, workDir: string): PipelineConfig`
+
+Resolves a raw pipeline config into a fully resolved `PipelineConfig` — applies inheritance (pipeline → track → task) for driver, model_tier, permissions, and cwd. Validates and resolves all file paths against `workDir`.
+
+Use `loadPipeline` for the common parse-and-resolve flow. Use `resolveConfig` directly when you need to manipulate the raw config between parsing and resolution.
+
+### `expandTemplates(tasks, instancePrefix): Promise<RawTaskConfig[]>`
+
+Expands `use:` template references in a task list. Loads template packages (`@tagma/template-*`), resolves parameters, and namespaces task IDs and dependencies. Called internally by `loadPipeline`.
+
 ### `attachStdinApprovalAdapter(gateway): StdinApprovalAdapter`
 
 Attaches an interactive stdin-based approval handler.
@@ -248,6 +274,40 @@ const { nodes, edges } = buildRawDag(draftConfig);
 ```
 
 Use `buildDag` instead when you have a fully resolved `PipelineConfig` and need topological sort order.
+
+### `Logger`
+
+Dual-channel logger — console + file. Creates a per-run log file at `<workDir>/.tagma/logs/<runId>/pipeline.log`.
+
+```ts
+const logger = new Logger(workDir, runId);
+logger.info('[track]', 'message');   // console + file
+logger.warn('[track]', 'message');   // console + file
+logger.error('[track]', 'message');  // console + file
+logger.debug('[track]', 'message');  // file only
+logger.section('Title');             // file only — visual separator
+logger.quiet(bulkText);             // file only — bulk payload
+logger.path;                        // log file path
+logger.dir;                         // run artifact directory
+```
+
+### `tailLines(text: string, n: number): string`
+
+Returns the last `n` non-empty lines of `text`, joined with newlines.
+
+### `clip(text: string, maxBytes?: number): string`
+
+Truncates `text` to at most `maxBytes` UTF-8 bytes (default 16 KB), appending a `…[truncated N bytes]` marker when truncation occurs. Multi-byte characters (CJK, emoji) are counted correctly.
+
+### Utilities
+
+| Function | Description |
+|---|---|
+| `parseDuration(input)` | Parses `"30s"`, `"5m"`, `"2h"` → milliseconds |
+| `validatePath(filePath, projectRoot)` | Resolves path, throws if it escapes project root |
+| `generateRunId()` | Generates a unique run ID (`run_<ts>_<seq>_<rand>`) |
+| `nowISO()` | Returns `new Date().toISOString()` |
+| `truncateForName(text, maxLen?)` | Truncates first line to `maxLen` (default 40) for display |
 
 ## Related Packages
 
