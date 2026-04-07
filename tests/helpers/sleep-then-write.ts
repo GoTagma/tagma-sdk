@@ -14,5 +14,22 @@ await Bun.sleep(ms);
 
 const fullPath = resolve(process.cwd(), relativePath);
 await mkdir(dirname(fullPath), { recursive: true });
-await Bun.write(fullPath, content ? `${content}\n` : '');
+
+// Retry loop: on Windows, file watchers can hold a brief lock (EPERM/EBUSY)
+// when a write lands immediately after chokidar detects a previous change.
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 200;
+for (let attempt = 0; ; attempt++) {
+  try {
+    await Bun.write(fullPath, content ? `${content}\n` : '');
+    break;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if ((code === 'EPERM' || code === 'EBUSY') && attempt < MAX_RETRIES) {
+      await Bun.sleep(RETRY_DELAY_MS);
+      continue;
+    }
+    throw err;
+  }
+}
 console.log(`wrote-after:${ms}:${relativePath}`);

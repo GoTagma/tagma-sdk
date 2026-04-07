@@ -314,6 +314,76 @@ async function runCase(name: CaseName): Promise<void> {
     const exists = await Bun.file(countFile).exists();
     assert(`${name}: hook-count.txt created by second hook`, exists, true);
   }
+
+  // ── 16-cwd-override: verify file landed in correct subdirectory with correct content ──
+  if (name === '16-cwd-override') {
+    const outFile = resolve(workDir, 'sub-workspace', 'output', 'from-sub.txt');
+    const exists = await Bun.file(outFile).exists();
+    assert(`${name}: from-sub.txt exists in sub-workspace/output`, exists, true);
+    if (exists) {
+      const content = (await Bun.file(outFile).text()).trim();
+      assert(`${name}: from-sub.txt content`, content, 'CWD_OVERRIDE_OK');
+    }
+  }
+
+  // ── 20-track-cwd: verify track-level cwd placed file correctly ──
+  if (name === '20-track-cwd') {
+    const outFile = resolve(workDir, 'sub-workspace', 'track-cwd-output.txt');
+    const exists = await Bun.file(outFile).exists();
+    assert(`${name}: track-cwd-output.txt exists in sub-workspace`, exists, true);
+    if (exists) {
+      const content = (await Bun.file(outFile).text()).trim();
+      assert(`${name}: track-cwd-output.txt content`, content, 'TRACK_CWD_OK');
+    }
+  }
+
+  // ── 18-signal-cancel: verify tasks were actually killed early (durationMs << 2000ms) ──
+  if (name === '18-signal-cancel') {
+    for (const key of ['long_tasks.long_a', 'long_tasks.long_b']) {
+      const state = result.states.get(key);
+      assert(`${name}: ${key} status is timeout`, state?.status, 'timeout');
+      if (state?.result) {
+        const tooLong = state.result.durationMs > 1500;
+        assert(`${name}: ${key} killed early (durationMs <= 1500)`, tooLong, false);
+      }
+    }
+  }
+
+  // ── 19-ignore-cross-track: verify cross_dep produced its output file ──
+  if (name === '19-ignore-cross-track') {
+    const outFile = resolve(workDir, '.tagma-tests', 'generated', 'cross-ignore.txt');
+    const exists = await Bun.file(outFile).exists();
+    assert(`${name}: cross-ignore.txt exists`, exists, true);
+    if (exists) {
+      const content = (await Bun.file(outFile).text()).trim();
+      assert(`${name}: cross-ignore.txt content`, content, 'CROSS_IGNORE_OK');
+    }
+    // Verify the failing task actually failed and the dependent task succeeded
+    const failState = result.states.get('failing_track.fail_task');
+    const depState = result.states.get('dependent_track.cross_dep');
+    assert(`${name}: fail_task status`, failState?.status, 'failed');
+    assert(`${name}: cross_dep status`, depState?.status, 'success');
+  }
+
+  // ── 22-file-trigger-change: verify content assertions ──
+  if (name === '22-file-trigger-change') {
+    // watched.txt should have final overwritten content
+    const watchedFile = resolve(workDir, '.tagma-tests', 'generated', 'watched.txt');
+    const watchedExists = await Bun.file(watchedFile).exists();
+    assert(`${name}: watched.txt exists`, watchedExists, true);
+    if (watchedExists) {
+      const content = (await Bun.file(watchedFile).text()).trim();
+      assert(`${name}: watched.txt final content is CHANGED`, content, 'CHANGED');
+    }
+    // reacted.txt should have been created by the reactor
+    const reactedFile = resolve(workDir, '.tagma-tests', 'generated', 'reacted.txt');
+    const reactedExists = await Bun.file(reactedFile).exists();
+    assert(`${name}: reacted.txt exists`, reactedExists, true);
+    if (reactedExists) {
+      const content = (await Bun.file(reactedFile).text()).trim();
+      assert(`${name}: reacted.txt content`, content, 'CHANGE_DETECTED');
+    }
+  }
 }
 
 // ═══ PipelineRunner + onEvent Smoke Test ═══
