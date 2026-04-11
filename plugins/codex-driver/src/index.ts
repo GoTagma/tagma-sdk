@@ -20,7 +20,7 @@ import type {
 } from '@tagma/types';
 
 const MODEL_MAP: Record<string, string> = {
-  high: 'gpt-5-codex', medium: 'gpt-5-codex', low: 'gpt-5-codex',
+  high: 'gpt-5.3-codex', medium: 'gpt-5.3-codex', low: 'gpt-5.3-codex',
 };
 
 // Codex model reasoning effort — only 'low' | 'medium' | 'high' are supported
@@ -91,12 +91,16 @@ const CodexDriver: DriverPlugin = {
     // the prompt from stdin. -a/--ask-for-approval is a top-level codex flag
     // and MUST appear before the `exec` subcommand. `never` is required for
     // headless execution since there's no TTY to confirm on.
+    // --skip-git-repo-check lets Tagma workspaces that aren't git repos
+    // run without the "Not inside a trusted directory" preflight error;
+    // the workspace sandbox is already controlled by --sandbox below.
     // Override reasoning effort via -c to avoid user config (e.g. "xhigh")
     // values that aren't supported by the current model.
     const args: string[] = [
       'codex',
       '-a', 'never',
       'exec',
+      '--skip-git-repo-check',
       '-c', `model_reasoning_effort="${reasoningEffort}"`,
       '--model', model,
       '--sandbox', sandbox,
