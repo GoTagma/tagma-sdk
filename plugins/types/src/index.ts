@@ -27,6 +27,38 @@ export interface Permissions {
   readonly execute: boolean;
 }
 
+// ═══ Plugin Schema ═══
+//
+// Declarative metadata a plugin can expose so editors/UIs can render a typed
+// form for its config instead of falling back to a raw key/value editor.
+// Schema is purely descriptive — plugins still perform their own runtime
+// validation. Declaring a field here is optional.
+
+export type PluginParamType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'enum'
+  | 'path'
+  | 'duration'
+  | 'number-or-list';
+
+export interface PluginParamDef {
+  readonly type: PluginParamType;
+  readonly description?: string;
+  readonly required?: boolean;
+  readonly default?: unknown;
+  readonly enum?: readonly string[];
+  readonly min?: number;
+  readonly max?: number;
+  readonly placeholder?: string;
+}
+
+export interface PluginSchema {
+  readonly description?: string;
+  readonly fields: Readonly<Record<string, PluginParamDef>>;
+}
+
 // ═══ Trigger / Completion / Middleware Configs ═══
 
 export interface TriggerConfig {
@@ -275,6 +307,7 @@ export interface TriggerContext {
 
 export interface TriggerPlugin {
   readonly name: string;
+  readonly schema?: PluginSchema;
   watch(config: Record<string, unknown>, ctx: TriggerContext): Promise<unknown>;
 }
 
@@ -286,6 +319,7 @@ export interface CompletionContext {
 
 export interface CompletionPlugin {
   readonly name: string;
+  readonly schema?: PluginSchema;
   check(config: Record<string, unknown>, result: TaskResult, ctx: CompletionContext): Promise<boolean>;
 }
 
@@ -300,6 +334,7 @@ export interface MiddlewareContext {
 
 export interface MiddlewarePlugin {
   readonly name: string;
+  readonly schema?: PluginSchema;
   enhance(prompt: string, config: Record<string, unknown>, ctx: MiddlewareContext): Promise<string>;
 }
 

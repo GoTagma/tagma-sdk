@@ -5,6 +5,23 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const OutputCheckCompletion: CompletionPlugin = {
   name: 'output_check',
+  schema: {
+    description: 'Pipe task stdout into a shell command; mark success when that command exits 0.',
+    fields: {
+      check: {
+        type: 'string',
+        required: true,
+        description: 'Shell command to run. Task stdout is piped to its stdin.',
+        placeholder: "grep -q 'PASS'",
+      },
+      timeout: {
+        type: 'duration',
+        default: '30s',
+        description: 'Maximum time to wait for the check command.',
+        placeholder: '30s',
+      },
+    },
+  },
 
   async check(config: Record<string, unknown>, result: TaskResult, ctx: CompletionContext): Promise<boolean> {
     const checkCmd = config.check as string;

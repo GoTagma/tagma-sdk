@@ -32,6 +32,10 @@ export type { ValidationError } from './validate-raw';
 // ── Schema: parse / resolve / load / serialize / validate ──
 export { parseYaml, resolveConfig, expandTemplates, loadPipeline, serializePipeline, deresolvePipeline, validateConfig } from './schema';
 
+// ── Templates: discovery + manifest loading (F1) ──
+export { discoverTemplates, loadTemplateManifest } from './templates';
+export type { TemplateManifest } from './templates';
+
 // ── DAG ──
 export { buildDag, buildRawDag } from './dag';
 export type { DagNode, Dag, RawDagNode, RawDag } from './dag';

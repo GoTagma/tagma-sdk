@@ -3,6 +3,26 @@ import { parseDuration } from '../utils';
 
 export const ManualTrigger: TriggerPlugin = {
   name: 'manual',
+  schema: {
+    description: 'Pause the task until a user approves via the approval gateway.',
+    fields: {
+      message: {
+        type: 'string',
+        description: 'Prompt shown to the approver. Defaults to a generic message if empty.',
+        placeholder: 'Confirm deployment to production?',
+      },
+      timeout: {
+        type: 'duration',
+        description: 'Maximum wait time (e.g. 10m). Omit or 0 to wait indefinitely.',
+        placeholder: '10m',
+      },
+      options: {
+        type: 'string',
+        description: 'Comma-separated list of choices offered to the approver (e.g. "yes,no,defer").',
+        placeholder: 'yes,no',
+      },
+    },
+  },
 
   async watch(config: Record<string, unknown>, ctx: TriggerContext): Promise<unknown> {
     const message =

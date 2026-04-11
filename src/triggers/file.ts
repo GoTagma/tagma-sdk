@@ -11,6 +11,22 @@ function pathsEqual(a: string, b: string): boolean {
 
 export const FileTrigger: TriggerPlugin = {
   name: 'file',
+  schema: {
+    description: 'Wait for a file to appear or be modified before the task runs.',
+    fields: {
+      path: {
+        type: 'path',
+        required: true,
+        description: 'Path to the file to watch (relative to workDir or absolute).',
+        placeholder: 'e.g. build/output.json',
+      },
+      timeout: {
+        type: 'duration',
+        description: 'Maximum wait time (e.g. 30s, 5m). Omit or 0 to wait indefinitely.',
+        placeholder: '30s',
+      },
+    },
+  },
 
   watch(config: Record<string, unknown>, ctx: TriggerContext): Promise<unknown> {
     const filePath = config.path as string;

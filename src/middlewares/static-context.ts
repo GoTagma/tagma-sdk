@@ -4,6 +4,22 @@ import { validatePath } from '../utils';
 
 export const StaticContextMiddleware: MiddlewarePlugin = {
   name: 'static_context',
+  schema: {
+    description: 'Prepend a reference file to the prompt as static context.',
+    fields: {
+      file: {
+        type: 'path',
+        required: true,
+        description: 'Path to the reference file (relative to workDir or absolute).',
+        placeholder: 'docs/spec.md',
+      },
+      label: {
+        type: 'string',
+        description: 'Header shown before the content. Defaults to "Reference: <basename>".',
+        placeholder: 'Reference: spec.md',
+      },
+    },
+  },
 
   async enhance(
     prompt: string,

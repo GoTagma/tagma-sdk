@@ -30,6 +30,7 @@ src/
 ├── dag.ts             # DAG construction & topological sort
 ├── runner.ts          # Task executor (Bun.spawn wrapper)
 ├── schema.ts          # YAML parsing, validation & template expansion
+├── templates.ts       # Node-compatible template discovery (discoverTemplates / loadTemplateManifest)
 ├── types.ts           # Re-exports @tagma/types + runtime constants
 ├── registry.ts        # Plugin registry
 ├── hooks.ts           # Hook lifecycle management
@@ -56,6 +57,8 @@ plugins/
 - External drivers live under `plugins/` and are not bundled into core
 - All file path handling must use `validatePath` — no `..` traversal, no absolute paths
 - `prompt` and `command` are mutually exclusive on a Task
+- Trigger/Completion/Middleware plugins may expose an optional `schema: PluginSchema` field (declarative metadata for visual editors); schemas are descriptive only and do not replace runtime validation
+- Anything that needs to run from the editor server (Node runtime) must avoid Bun-only APIs — see `src/templates.ts` for the Node-safe template discovery helpers vs the Bun-only `loadTemplate` inside `schema.ts`
 
 ## Publishing
 

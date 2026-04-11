@@ -60,7 +60,8 @@ console.log(result.success ? 'Done' : 'Failed');
 - **Lifecycle hooks** -- `pipeline_start`, `task_start`, `task_success`, `task_failure`, `pipeline_complete`, `pipeline_error`
 - **Middleware** -- enrich prompts before execution (e.g. inject static context)
 - **Completion checks** -- validate task output with `exit_code`, `file_exists`, or `output_check` plugins
-- **Template expansion** -- reusable task templates with parameterized `use` / `with`
+- **Template expansion** -- reusable task templates with parameterized `use` / `with`; `discoverTemplates()` enumerates installed `@tagma/template-*` packages for editor integrations
+- **Plugin schemas** -- triggers/completions/middlewares can declare a `PluginSchema` so visual editors render typed forms for their config
 
 ## Pipeline YAML Reference
 
@@ -333,6 +334,27 @@ Dynamically loads and registers external plugin packages.
 
 Registers a plugin handler manually. Idempotent — duplicate registrations are silently ignored.
 
+Plugin handlers (`TriggerPlugin`, `CompletionPlugin`, `MiddlewarePlugin`) may optionally expose a declarative `schema: PluginSchema` field so visual editors can render a typed form for the plugin's config instead of a raw key/value editor:
+
+```ts
+import type { TriggerPlugin } from '@tagma/types';
+
+export const HttpTrigger: TriggerPlugin = {
+  name: 'http',
+  schema: {
+    description: 'Wait for an HTTP endpoint to return 2xx before the task runs.',
+    fields: {
+      url:    { type: 'string', required: true, placeholder: 'https://...' },
+      method: { type: 'enum',   enum: ['GET', 'POST'], default: 'GET' },
+      timeout:{ type: 'duration', description: 'Give up after this long.' },
+    },
+  },
+  async watch(config, ctx) { /* ... */ },
+};
+```
+
+The schema is purely descriptive — plugins still perform their own runtime validation. Supported field types: `string`, `number`, `boolean`, `enum`, `path`, `duration`, `number-or-list`. Each field can declare `required`, `default`, `description`, `enum`, `min`/`max`, `placeholder`. Built-in plugins (`file`/`manual` triggers; `exit_code`/`file_exists`/`output_check` completions; `static_context` middleware) all ship with schemas so editors can generate forms out of the box.
+
 ### `getHandler(category, type): PluginType`
 
 Retrieves a registered plugin handler. Throws if the plugin is not registered.
@@ -354,6 +376,25 @@ Use `loadPipeline` for the common parse-and-resolve flow. Use `resolveConfig` di
 ### `expandTemplates(tasks, instancePrefix): Promise<RawTaskConfig[]>`
 
 Expands `use:` template references in a task list. Loads template packages (`@tagma/template-*`), resolves parameters, and namespaces task IDs and dependencies. Called internally by `loadPipeline`.
+
+### `discoverTemplates(workDir: string): TemplateManifest[]`
+
+Scans `<workDir>/node_modules/@tagma/` for installed `template-*` packages and returns their manifests (name, description, params, ref). Intended for editors/UIs that want to render a "pick a template" browser without actually expanding any templates. Silently skips packages whose `template.yaml` is missing or invalid.
+
+```ts
+import { discoverTemplates } from '@tagma/sdk';
+
+const templates = discoverTemplates(process.cwd());
+// [{ ref: '@tagma/template-review', name: 'Code Review', description: '...', params: {...}, tasks: [...] }, ...]
+```
+
+Each `TemplateManifest` is a `TemplateConfig` with an extra `ref` field — the value users drop into `task.use`.
+
+### `loadTemplateManifest(ref: string, workDir: string): TemplateManifest | null`
+
+Loads a single template's manifest by ref (e.g. `@tagma/template-review`). Returns `null` when the package isn't installed or its manifest fails to parse. Complements `discoverTemplates` when the caller only needs one template.
+
+Both functions use Node's `fs` APIs and are safe to call from Node runtimes (unlike the legacy Bun-only `loadTemplate` used internally by `expandTemplates`).
 
 ### `attachStdinApprovalAdapter(gateway): StdinApprovalAdapter`
 
