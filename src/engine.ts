@@ -133,6 +133,12 @@ export interface RunPipelineOptions {
    */
   readonly maxLogRuns?: number;
   /**
+   * Caller-supplied run ID. When provided the engine uses this instead of
+   * generating its own via `generateRunId()`, keeping the editor and SDK
+   * log directories aligned on the same ID.
+   */
+  readonly runId?: string;
+  /**
    * External AbortSignal — aborting it cancels the pipeline immediately.
    * Equivalent to the pipeline timeout firing, but caller-controlled.
    */
@@ -163,7 +169,7 @@ export async function runPipeline(
   }
 
   const dag = buildDag(config);
-  const runId = generateRunId();
+  const runId = options.runId ?? generateRunId();
   preflight(config, dag);
 
   const startedAt = nowISO();
@@ -723,6 +729,8 @@ export async function runPipeline(
   return { success: allSuccess, runId, logPath: log.path, summary, states: freezeStates(states) };
 
   } finally {
+    // Close the persistent log file handle before pruning.
+    log.close();
     // Prune old per-run log directories on every exit path (normal, blocked, or thrown).
     // Exclude the current runId so a concurrent run cannot delete its own live directory.
     if (maxLogRuns > 0) {

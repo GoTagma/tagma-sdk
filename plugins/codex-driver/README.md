@@ -10,7 +10,7 @@ Translates pipeline tasks into `codex exec` invocations for headless, non-intera
 bun add @tagma/driver-codex
 ```
 
-Requires the `codex` CLI to be installed and available in your PATH.
+Requires the `codex` CLI to be installed and available in your PATH. The driver checks for the CLI at task start and throws a clear error if it's missing.
 
 ## Usage
 

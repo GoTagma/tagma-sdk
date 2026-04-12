@@ -101,7 +101,9 @@ async function loadTemplate(ref: string): Promise<TemplateConfig> {
     // Expect the module to export a template.yaml content or parsed object
     if (mod.template) return mod.template as TemplateConfig;
 
-    // Try loading template.yaml from the package
+    // Try loading template.yaml from the package.
+    // NOTE: require.resolve is a CommonJS API. Bun supports it natively, but
+    // this would need import.meta.resolve() for pure ESM runtimes (e.g. Deno).
     const pkgPath = require.resolve(`${moduleName}/template.yaml`);
     const content = await Bun.file(pkgPath).text();
     const doc = yaml.load(content) as { template: TemplateConfig };

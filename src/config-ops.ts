@@ -226,13 +226,21 @@ export function moveTask(
 /**
  * Move a task from one track to another (appends to the target track).
  * No-op if either trackId or taskId is not found.
+ *
+ * When `qualifyRefs` is true (the default), bare references (`depends_on`,
+ * `continue_from`) pointing to the moved task are converted to fully-qualified
+ * refs (`toTrackId.taskId`) so that same-track resolution doesn't silently
+ * break after the task changes tracks.
  */
 export function transferTask(
   config: RawPipelineConfig,
   fromTrackId: string,
   taskId: string,
   toTrackId: string,
+  qualifyRefs = true,
 ): RawPipelineConfig {
+  if (fromTrackId === toTrackId) return config;
+
   let task: RawTaskConfig | undefined;
   const afterRemove = {
     ...config,
@@ -245,5 +253,70 @@ export function transferTask(
     }),
   };
   if (!task) return config;
-  return upsertTask(afterRemove, toTrackId, task);
+  const afterInsert = upsertTask(afterRemove, toTrackId, task);
+
+  if (!qualifyRefs) return afterInsert;
+
+  // Qualify bare references to the moved task. After the move, bare ref
+  // "taskId" from the old track no longer resolves via same-track priority.
+  // Convert it to the qualified form "toTrackId.taskId" so the dependency
+  // graph stays correct.
+  const qualId = `${toTrackId}.${taskId}`;
+  const oldQualId = `${fromTrackId}.${taskId}`;
+
+  // Does any track (other than the destination) still have a task with this bare id?
+  const bareIdSurvivesElsewhere = afterInsert.tracks.some(t =>
+    t.id !== toTrackId && t.tasks.some(tk => tk.id === taskId),
+  );
+
+  return {
+    ...afterInsert,
+    tracks: afterInsert.tracks.map(t => {
+      const localHasId = t.tasks.some(tk => tk.id === taskId);
+
+      const qualifyRef = (ref: string): string => {
+        // Already-qualified ref to old location → rewrite to new location
+        if (ref === oldQualId) return qualId;
+        // Bare ref: only needs qualifying if it would have resolved to the
+        // moved task before the transfer
+        if (ref === taskId) {
+          if (t.id === fromTrackId) {
+            // Was same-track in the old track — now the task is gone.
+            // If no other local task shadows it, qualify to new location.
+            if (!localHasId) return qualId;
+          }
+          // From a different track: bare ref resolved globally before.
+          // If the bare id is now ambiguous or gone from this track's
+          // perspective, qualify it.
+          if (!localHasId && !bareIdSurvivesElsewhere) return qualId;
+        }
+        return ref;
+      };
+
+      return {
+        ...t,
+        tasks: t.tasks.map(tk => qualifyTaskRefs(tk, qualifyRef)),
+      };
+    }),
+  };
+}
+
+/** Rewrite `depends_on` and `continue_from` refs using a mapping function. */
+function qualifyTaskRefs(
+  task: RawTaskConfig,
+  rewrite: (ref: string) => string,
+): RawTaskConfig {
+  const newDeps = task.depends_on?.map(rewrite);
+  const newContinue = task.continue_from !== undefined ? rewrite(task.continue_from) : undefined;
+
+  const depsChanged = newDeps !== undefined && newDeps.some((d, i) => d !== task.depends_on![i]);
+  const continueChanged = newContinue !== undefined && newContinue !== task.continue_from;
+
+  if (!depsChanged && !continueChanged) return task;
+
+  return {
+    ...task,
+    ...(newDeps !== undefined ? { depends_on: newDeps } : {}),
+    ...(newContinue !== undefined ? { continue_from: newContinue } : {}),
+  };
 }

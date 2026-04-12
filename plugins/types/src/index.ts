@@ -247,7 +247,7 @@ export interface DriverPlugin {
   readonly name: string;
   readonly capabilities: DriverCapabilities;
   buildCommand(task: TaskConfig, track: TrackConfig, ctx: DriverContext): Promise<SpawnSpec>;
-  parseResult?(stdout: string, stderr: string): DriverResultMeta;
+  parseResult?(stdout: string, stderr?: string): DriverResultMeta;
   resolveModel?(tier: string): string;
   resolveTools?(permissions: Permissions): string;
 }

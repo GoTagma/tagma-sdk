@@ -59,6 +59,14 @@ const CodexDriver: DriverPlugin = {
   async buildCommand(
     task: TaskConfig, track: TrackConfig, ctx: DriverContext,
   ): Promise<SpawnSpec> {
+    // Preflight: verify the codex CLI is available on PATH
+    try {
+      Bun.spawnSync(['codex', '--version'], { stdout: 'ignore', stderr: 'ignore' });
+    } catch {
+      throw new Error(
+        'codex CLI not found on PATH. Install via: npm i -g @openai/codex',
+      );
+    }
     const tier = task.model_tier ?? track.model_tier ?? 'medium';
     const model = resolveModel(tier);
     const reasoningEffort = resolveReasoningEffort(tier);

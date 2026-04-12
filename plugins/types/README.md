@@ -38,7 +38,7 @@ import type {
 
 ### Plugin Interfaces
 
-- `DriverPlugin` -- translates a task into a spawn spec (`buildCommand`, `parseResult`)
+- `DriverPlugin` -- translates a task into a spawn spec (`buildCommand`, `parseResult`). `parseResult` receives `stdout` and an optional `stderr` parameter
 - `TriggerPlugin` -- watches for an event before a task starts (`watch`)
 - `CompletionPlugin` -- validates task output (`check`)
 - `MiddlewarePlugin` -- enriches prompts before execution (`enhance`)

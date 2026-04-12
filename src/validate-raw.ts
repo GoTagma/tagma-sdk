@@ -74,6 +74,7 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
     }
 
     // ── Per-task validation ──
+    const seenTaskIds = new Set<string>();
     for (let ki = 0; ki < track.tasks.length; ki++) {
       const task = track.tasks[ki];
       const taskPath = `${trackPath}.tasks[${ki}]`;
@@ -82,6 +83,11 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
         errors.push({ path: `${taskPath}.id`, message: 'Task id is required' });
         continue; // Can't check further without an id
       }
+
+      if (seenTaskIds.has(task.id)) {
+        errors.push({ path: taskPath, message: `Duplicate task id "${task.id}" in track "${track.id}"` });
+      }
+      seenTaskIds.add(task.id);
 
       // Template-based tasks: skip prompt/command checks (params validated at runtime)
       if (task.use) continue;

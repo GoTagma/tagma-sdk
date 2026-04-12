@@ -1,5 +1,5 @@
 import { resolve, dirname } from 'node:path';
-import { mkdirSync, appendFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, openSync, writeSync, closeSync } from 'node:fs';
 
 /**
  * Structured record emitted for every log line. Consumers (e.g. the editor
@@ -43,18 +43,21 @@ export class Logger {
   private readonly filePath: string;
   private readonly runDir: string;
   private readonly onLine: LogListener | null;
+  /** Persistent file descriptor for append writes (avoids open/close per line). */
+  private fd: number | null;
 
   constructor(workDir: string, runId: string, onLine?: LogListener) {
     this.runDir = resolve(workDir, '.tagma', 'logs', runId);
     this.filePath = resolve(this.runDir, 'pipeline.log');
     this.onLine = onLine ?? null;
     mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(
-      this.filePath,
+    const header =
       `# Pipeline run ${runId} @ ${new Date().toISOString()}\n` +
       `# Host: ${process.platform} ${process.arch}  Bun: ${process.versions.bun ?? 'n/a'}\n` +
-      `# Work dir: ${workDir}\n\n`,
-    );
+      `# Work dir: ${workDir}\n\n`;
+    writeFileSync(this.filePath, header);
+    // Open once for all subsequent appends (O_APPEND is implied by 'a' flag)
+    this.fd = openSync(this.filePath, 'a');
   }
 
   info(prefix: string, message: string): void {
@@ -105,10 +108,20 @@ export class Logger {
   }
 
   private append(line: string): void {
+    if (this.fd === null) return;
     try {
-      appendFileSync(this.filePath, line.endsWith('\n') ? line : line + '\n');
+      const data = line.endsWith('\n') ? line : line + '\n';
+      writeSync(this.fd, data);
     } catch {
       // Swallow log write failures; engine correctness shouldn't depend on logging.
+    }
+  }
+
+  /** Close the persistent file handle. Called by the engine at run completion. */
+  close(): void {
+    if (this.fd !== null) {
+      try { closeSync(this.fd); } catch { /* already closed */ }
+      this.fd = null;
     }
   }
 

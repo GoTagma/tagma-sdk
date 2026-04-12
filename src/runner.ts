@@ -15,10 +15,17 @@ const SIGKILL_DELAY_MS = 3_000;
 function killProcessTree(pid: number): void {
   if (process.platform !== 'win32') return;
   try {
-    Bun.spawnSync(['taskkill', '/F', '/T', '/PID', String(pid)], {
-      stdout: 'ignore',
-      stderr: 'ignore',
+    const result = Bun.spawnSync(['taskkill', '/F', '/T', '/PID', String(pid)], {
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
+    if (result.exitCode !== 0) {
+      const stderr = new TextDecoder().decode(result.stderr);
+      // Exit code 128 = process not found (already exited) — not worth warning about
+      if (result.exitCode !== 128) {
+        console.error(`[killProcessTree] taskkill exited ${result.exitCode} for PID ${pid}: ${stderr.trim()}`);
+      }
+    }
   } catch {
     /* best-effort — process may have already exited */
   }
@@ -140,6 +147,7 @@ export async function runSpawn(
 
   // ── 3. Timeout & abort handling ────────────────────────────────────────
   let killedByUs = false;
+  let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let forceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -165,7 +173,10 @@ export async function runSpawn(
   };
 
   if (timeoutMs && timeoutMs > 0) {
-    timer = setTimeout(killGracefully, timeoutMs);
+    timer = setTimeout(() => {
+      timedOut = true;
+      killGracefully();
+    }, timeoutMs);
   }
 
   const onAbort = () => killGracefully();
@@ -197,8 +208,10 @@ export async function runSpawn(
   // We initiated the kill (timeout or abort) — always treat as non-success
   // regardless of exit code. A process that catches SIGTERM and exits 0 still
   // hit the timeout; letting it pass as success would unblock downstream tasks
-  // incorrectly.
-  if (killedByUs) {
+  // incorrectly. The `timedOut` flag guards against the narrow race where the
+  // process exits naturally at the exact moment the timeout fires — even if
+  // killedByUs wasn't set in time, the timeout intention still applies.
+  if (killedByUs || timedOut) {
     return {
       exitCode: -1,
       stdout,

@@ -296,6 +296,7 @@ Options:
   - `task_status_change` — a task changed status; includes `state: TaskState` (complete snapshot at the time of change: `startedAt` is populated before the `running` event; `result` and `finishedAt` are populated before any terminal-status event)
   - `task_log` — a structured log line was written to `pipeline.log`. Mirrors every `Logger` call (info/warn/error/debug/section/quiet) and carries `{ taskId: string | null, level, timestamp, text }`. `taskId` is non-null for lines tagged with a `[task:<id>]` prefix (or passed explicitly to `section`/`quiet`) and `null` for pipeline-wide messages such as the configuration dump and DAG topology. Use this to stream the full run process into UIs without tailing the log file.
   - `pipeline_end` — pipeline finished; includes `success: boolean`
+- `runId` -- caller-supplied run ID. When provided the engine uses this instead of generating its own, keeping the caller and the SDK log directories aligned on the same ID
 - `maxLogRuns` -- number of per-run log directories to keep under `<workDir>/.tagma/logs/` (default: 20)
 
 ### `PipelineRunner`
@@ -435,7 +436,7 @@ const yaml = serializePipeline(config);
 | `upsertTask(config, trackId, task)` | Insert or replace a task |
 | `removeTask(config, trackId, taskId, cleanRefs?)` | Remove a task; pass `cleanRefs: true` to also strip dangling `depends_on` / `continue_from` references. Only refs that resolve to the deleted task are removed — same-named tasks in other tracks are unaffected |
 | `moveTask(config, trackId, taskId, toIndex)` | Reorder a task within its track |
-| `transferTask(config, fromTrackId, taskId, toTrackId)` | Move a task across tracks |
+| `transferTask(config, fromTrackId, taskId, toTrackId, qualifyRefs?)` | Move a task across tracks. When `qualifyRefs` is `true` (default), bare `depends_on` / `continue_from` references to the moved task are converted to fully-qualified form (`toTrackId.taskId`) so same-track resolution stays correct |
 
 ### `parseYaml(content: string): RawPipelineConfig`
 
@@ -469,7 +470,7 @@ Use `validateRaw` for editing raw configs in a UI; use `validateConfig` after `r
 
 Validates a raw pipeline config without resolving inheritance or executing anything. Returns a flat list of `{ path, message }` objects — empty array means valid.
 
-Checks: required fields, `prompt`/`command` exclusivity, `depends_on`/`continue_from` reference integrity (including ambiguous bare refs that exist in multiple tracks — use `trackId.taskId` to disambiguate), circular dependency detection.
+Checks: required fields, `prompt`/`command` exclusivity, duplicate task IDs within a track, `depends_on`/`continue_from` reference integrity (including ambiguous bare refs that exist in multiple tracks — use `trackId.taskId` to disambiguate), circular dependency detection.
 
 Does **not** check plugin registration (plugins may not be loaded at edit time).
 
@@ -508,6 +509,7 @@ logger.section('Title');             // file only — visual separator
 logger.quiet(bulkText);              // file only — bulk payload
 logger.path;                         // log file path
 logger.dir;                          // run artifact directory
+logger.close();                      // close the persistent file handle (called automatically by runPipeline at run completion)
 ```
 
 Pass an optional third argument to stream every appended line out as a
