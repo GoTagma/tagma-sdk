@@ -1,5 +1,6 @@
 import type { TriggerPlugin, TriggerContext } from '../types';
 import { parseDuration } from '../utils';
+import { TriggerBlockedError, TriggerTimeoutError } from '../engine';
 
 export const ManualTrigger: TriggerPlugin = {
   name: 'manual',
@@ -66,14 +67,15 @@ export const ManualTrigger: TriggerPlugin = {
       case 'approved':
         return { confirmed: true, approvalId: decision.approvalId, actor: decision.actor };
       case 'rejected':
-        throw new Error(
+        // A7: Use typed error for proper classification in the engine.
+        throw new TriggerBlockedError(
           `Manual trigger rejected by ${decision.actor ?? 'user'}` +
             (decision.reason ? `: ${decision.reason}` : ''),
         );
       case 'timeout':
-        throw new Error(`Manual trigger timeout: ${decision.reason ?? 'no decision made'}`);
+        throw new TriggerTimeoutError(`Manual trigger timeout: ${decision.reason ?? 'no decision made'}`);
       case 'aborted':
-        throw new Error(`Manual trigger aborted: ${decision.reason ?? 'pipeline aborted'}`);
+        throw new TriggerBlockedError(`Manual trigger aborted: ${decision.reason ?? 'pipeline aborted'}`);
     }
   },
 };

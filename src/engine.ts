@@ -19,6 +19,26 @@ import {
 import { Logger, tailLines, clip, type LogLevel } from './logger';
 import { InMemoryApprovalGateway, type ApprovalGateway } from './approval';
 
+// ═══ A7: Typed trigger errors ═══
+// Replace string-matching on error messages with structured error types so
+// coincidental substrings don't cause misclassification.
+
+export class TriggerBlockedError extends Error {
+  readonly code = 'TRIGGER_BLOCKED' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'TriggerBlockedError';
+  }
+}
+
+export class TriggerTimeoutError extends Error {
+  readonly code = 'TRIGGER_TIMEOUT' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'TriggerTimeoutError';
+  }
+}
+
 // ═══ Preflight Validation ═══
 
 function preflight(config: PipelineConfig, dag: Dag): void {
@@ -420,18 +440,26 @@ export async function runPipeline(
         });
         log.debug(`[task:${taskId}]`, `trigger fired`);
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
         // If pipeline was aborted while we were still waiting for the trigger,
         // this task never entered running state → skipped, not timeout.
         state.finishedAt = nowISO();
         if (pipelineAborted) {
           setTaskStatus(taskId, 'skipped');
-        } else if (msg.includes('rejected') || msg.includes('denied')) {
+        } else if (err instanceof TriggerBlockedError) {
           setTaskStatus(taskId, 'blocked');       // user/policy rejection
-        } else if (msg.includes('timeout')) {
+        } else if (err instanceof TriggerTimeoutError) {
           setTaskStatus(taskId, 'timeout');       // genuine trigger wait timeout
         } else {
-          setTaskStatus(taskId, 'failed');        // plugin error, watcher crash, etc.
+          // A7 fallback: also check message strings for backward-compat with
+          // third-party trigger plugins that don't throw typed errors yet.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('rejected') || msg.includes('denied')) {
+            setTaskStatus(taskId, 'blocked');
+          } else if (msg.includes('timeout')) {
+            setTaskStatus(taskId, 'timeout');
+          } else {
+            setTaskStatus(taskId, 'failed');      // plugin error, watcher crash, etc.
+          }
         }
         try {
           await fireHook(taskId, 'task_failure');

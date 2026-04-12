@@ -3,6 +3,7 @@ import { resolve, dirname } from 'path';
 import { mkdir } from 'fs/promises';
 import type { TriggerPlugin, TriggerContext } from '../types';
 import { parseDuration, validatePath } from '../utils';
+import { TriggerTimeoutError } from '../engine';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -118,7 +119,7 @@ export const FileTrigger: TriggerPlugin = {
         timer = setTimeout(() => {
           if (settled) return;
           cleanup();
-          reject(new Error(`file trigger timeout: ${filePath} did not appear within ${config.timeout}`));
+          reject(new TriggerTimeoutError(`file trigger timeout: ${filePath} did not appear within ${config.timeout}`));
         }, timeoutMs);
       }
 

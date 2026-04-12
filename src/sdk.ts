@@ -4,7 +4,7 @@
 // The CLI (src/index.ts in the CLI project) also imports from here.
 
 // ── Core engine ──
-export { runPipeline } from './engine';
+export { runPipeline, TriggerBlockedError, TriggerTimeoutError } from './engine';
 export type { EngineResult, RunPipelineOptions, PipelineEvent } from './engine';
 
 // ── Pipeline runner (multi-pipeline lifecycle management) ──
