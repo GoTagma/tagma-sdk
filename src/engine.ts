@@ -433,7 +433,11 @@ export async function runPipeline(
         } else {
           setTaskStatus(taskId, 'failed');        // plugin error, watcher crash, etc.
         }
-        await fireHook(taskId, 'task_failure');
+        try {
+          await fireHook(taskId, 'task_failure');
+        } catch (hookErr) {
+          log.error(`[task:${taskId}]`, `hook execution failed: ${hookErr instanceof Error ? hookErr.message : String(hookErr)}`);
+        }
         return;
       }
     }
@@ -448,7 +452,11 @@ export async function runPipeline(
     if (!hookResult.allowed) {
       state.finishedAt = nowISO();
       setTaskStatus(taskId, 'blocked');
-      await fireHook(taskId, 'task_failure');
+      try {
+        await fireHook(taskId, 'task_failure');
+      } catch (hookErr) {
+        log.error(`[task:${taskId}]`, `hook execution failed: ${hookErr instanceof Error ? hookErr.message : String(hookErr)}`);
+      }
       return;
     }
 
@@ -628,7 +636,11 @@ export async function runPipeline(
 
     // 7. Fire hooks
     const finalStatus: TaskStatus = state.status;
-    await fireHook(taskId, finalStatus === 'success' ? 'task_success' : 'task_failure');
+    try {
+      await fireHook(taskId, finalStatus === 'success' ? 'task_success' : 'task_failure');
+    } catch (hookErr) {
+      log.error(`[task:${taskId}]`, `hook execution failed: ${hookErr instanceof Error ? hookErr.message : String(hookErr)}`);
+    }
 
     // 8. Handle stop_all for failure states
     if (finalStatus !== 'success' && getOnFailure(taskId) === 'stop_all') {

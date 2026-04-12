@@ -79,6 +79,9 @@ async function runSingleHook(
     }
 
     return exitCode;
+  } catch (err) {
+    console.error(`[hook: ${command}] spawn error: ${err instanceof Error ? err.message : String(err)}`);
+    return -1;
   } finally {
     if (timer) clearTimeout(timer);
     if (signal) signal.removeEventListener('abort', onAbort);

@@ -8,6 +8,14 @@
 
 import type { RawPipelineConfig } from './types';
 
+const DURATION_RE = /^(\d*\.?\d+)\s*(s|m|h|d)$/;
+function isValidDuration(input: string): boolean {
+  return DURATION_RE.test(input.trim());
+}
+
+const VALID_ON_FAILURE = new Set(['skip_downstream', 'stop_all', 'ignore']);
+const VALID_MODEL_TIERS = new Set(['low', 'medium', 'high']);
+
 export interface ValidationError {
   /** JSONPath-style location, e.g. "tracks[0].tasks[1].prompt" */
   path: string;
@@ -57,15 +65,26 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
   }
 
   // ── Per-track validation ──
+  const seenTrackIds = new Set<string>();
   for (let ti = 0; ti < config.tracks.length; ti++) {
     const track = config.tracks[ti];
     const trackPath = `tracks[${ti}]`;
 
     if (!track.id?.trim()) {
       errors.push({ path: `${trackPath}.id`, message: 'Track id is required' });
+    } else if (seenTrackIds.has(track.id)) {
+      errors.push({ path: `${trackPath}.id`, message: `Duplicate track id "${track.id}"` });
+    } else {
+      seenTrackIds.add(track.id);
     }
     if (!track.name?.trim()) {
       errors.push({ path: `${trackPath}.name`, message: 'Track name is required' });
+    }
+    if (track.on_failure && !VALID_ON_FAILURE.has(track.on_failure)) {
+      errors.push({ path: `${trackPath}.on_failure`, message: `Invalid on_failure value "${track.on_failure}". Expected "skip_downstream", "stop_all", or "ignore".` });
+    }
+    if (track.model_tier && !VALID_MODEL_TIERS.has(track.model_tier)) {
+      errors.push({ path: `${trackPath}.model_tier`, message: `Invalid model_tier "${track.model_tier}". Expected "low", "medium", or "high".` });
     }
 
     if (!track.tasks || track.tasks.length === 0) {
@@ -108,6 +127,14 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
         });
       }
 
+      // ── Field-level validations ──
+      if (task.timeout && !isValidDuration(task.timeout)) {
+        errors.push({ path: `${taskPath}.timeout`, message: `Invalid duration format "${task.timeout}". Expected e.g. "30s", "5m", "1h".` });
+      }
+      if (task.model_tier && !VALID_MODEL_TIERS.has(task.model_tier)) {
+        errors.push({ path: `${taskPath}.model_tier`, message: `Invalid model_tier "${task.model_tier}". Expected "low", "medium", or "high".` });
+      }
+
       // ── depends_on reference checks ──
       if (task.depends_on && task.depends_on.length > 0) {
         for (const dep of task.depends_on) {
@@ -138,6 +165,13 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
           errors.push({
             path: `${taskPath}.continue_from`,
             message: `Task "${task.id}": continue_from "${task.continue_from}" is ambiguous — multiple tracks have a task with this id. Use the fully-qualified form "trackId.${task.continue_from}".`,
+          });
+        } else if (!task.depends_on || !task.depends_on.some(dep =>
+          resolveDepRef(dep, track.id, allQualified, bareToQualified) === resolved
+        )) {
+          errors.push({
+            path: `${taskPath}.continue_from`,
+            message: `Task "${task.id}": continue_from "${task.continue_from}" should also be listed in depends_on to ensure ordering`,
           });
         }
       }

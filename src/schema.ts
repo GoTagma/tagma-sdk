@@ -216,6 +216,32 @@ function expandTemplateTask(
 // ═══ Config Inheritance Resolution ═══
 
 export function resolveConfig(raw: RawPipelineConfig, workDir: string): PipelineConfig {
+  // Build qualified ID set for resolving bare continue_from references
+  const allQualifiedIds = new Set<string>();
+  for (const t of raw.tracks) {
+    if (!t.id) continue;
+    for (const tk of t.tasks ?? []) {
+      if (tk.id) allQualifiedIds.add(`${t.id}.${tk.id}`);
+    }
+  }
+
+  function qualifyContinueFrom(ref: string, trackId: string): string {
+    // Already qualified
+    if (allQualifiedIds.has(ref)) return ref;
+    // Same-track shorthand
+    const sameTrack = `${trackId}.${ref}`;
+    if (allQualifiedIds.has(sameTrack)) return sameTrack;
+    // Cross-track bare lookup — must be unambiguous
+    let match: string | null = null;
+    for (const qid of allQualifiedIds) {
+      if (qid.endsWith(`.${ref}`)) {
+        if (match !== null) return ref; // ambiguous — leave as-is
+        match = qid;
+      }
+    }
+    return match ?? ref; // not found — leave as-is (validated elsewhere)
+  }
+
   const tracks: TrackConfig[] = raw.tracks.map(rawTrack => {
     const trackDriver = rawTrack.driver ?? raw.driver;
     // validatePath enforces no .. traversal and no absolute paths escaping workDir.
@@ -232,7 +258,9 @@ export function resolveConfig(raw: RawPipelineConfig, workDir: string): Pipeline
         command: rawTask.command,
         depends_on: rawTask.depends_on,
         trigger: rawTask.trigger,
-        continue_from: rawTask.continue_from,
+        continue_from: rawTask.continue_from
+          ? qualifyContinueFrom(rawTask.continue_from, rawTrack.id)
+          : undefined,
         output: rawTask.output,
         // Inheritance: Task > Track
         model_tier: rawTask.model_tier ?? rawTrack.model_tier ?? 'medium',
