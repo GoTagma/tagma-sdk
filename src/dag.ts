@@ -84,7 +84,15 @@ export function buildDag(config: PipelineConfig): Dag {
         }
       }
       if (task.continue_from) {
-        const resolved = resolveRef(task.continue_from, track.id);
+        let resolved: string;
+        try {
+          resolved = resolveRef(task.continue_from, track.id);
+        } catch {
+          throw new Error(
+            `Task "${qid}": continue_from "${task.continue_from}" — no such task found. ` +
+            `Use a fully-qualified reference (trackId.taskId) or ensure the target task exists.`
+          );
+        }
         if (!deps.includes(resolved)) {
           deps.push(resolved); // continue_from implies dependency
         }

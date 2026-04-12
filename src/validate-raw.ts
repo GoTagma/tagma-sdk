@@ -241,11 +241,15 @@ function detectCycles(
   function dfs(id: string): void {
     if (inStack.has(id)) {
       const cycleStart = pathStack.indexOf(id);
-      const cycleNodes = [...pathStack.slice(cycleStart), id];
-      const key = [...cycleNodes].sort().join(',');
+      // Unique nodes in the cycle (without repeating the start node) for dedup.
+      // Previously the duplicate start node caused different sorted keys when
+      // the same cycle was discovered from different entry points.
+      const uniqueNodes = pathStack.slice(cycleStart);
+      const key = [...uniqueNodes].sort().join(',');
       if (!seenCycles.has(key)) {
         seenCycles.add(key);
-        errors.push({ path: 'tracks', message: `Circular dependency detected: ${cycleNodes.join(' → ')}` });
+        const display = [...uniqueNodes, id]; // include start for readable display
+        errors.push({ path: 'tracks', message: `Circular dependency detected: ${display.join(' → ')}` });
       }
       return;
     }
