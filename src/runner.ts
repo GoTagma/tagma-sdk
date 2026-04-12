@@ -49,7 +49,17 @@ export interface RunOptions {
  * Returns the original name if resolution fails; Bun will raise the same
  * ENOENT it would have otherwise.
  */
+const RESOLVED_EXE_CACHE_MAX = 128;
 const resolvedExeCache = new Map<string, string | null>();
+
+/** Evict the oldest entry when the cache is at capacity. */
+function evictIfFull(): void {
+  if (resolvedExeCache.size >= RESOLVED_EXE_CACHE_MAX) {
+    // Map iteration order is insertion order — delete the first (oldest) key.
+    const oldest = resolvedExeCache.keys().next().value;
+    if (oldest !== undefined) resolvedExeCache.delete(oldest);
+  }
+}
 
 function resolveWindowsExe(
   args: readonly string[],
@@ -80,11 +90,13 @@ function resolveWindowsExe(
     for (const ext of exts) {
       const candidate = join(dir, cmd + ext);
       if (existsSync(candidate)) {
+        evictIfFull();
         resolvedExeCache.set(cacheKey, candidate);
         return [candidate, ...args.slice(1)];
       }
     }
   }
+  evictIfFull();
   resolvedExeCache.set(cacheKey, null);
   return args;
 }

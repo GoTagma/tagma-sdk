@@ -34,6 +34,17 @@ export const OutputCheckCompletion: CompletionPlugin = {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+    // Wire pipeline abort signal into the check process so external abort
+    // terminates the child instead of leaving it running undetected.
+    const onAbort = () => controller.abort();
+    if (ctx.signal) {
+      if (ctx.signal.aborted) {
+        controller.abort();
+      } else {
+        ctx.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
+
     const proc = Bun.spawn(shellArgs(checkCmd) as string[], {
       cwd: ctx.workDir,
       stdin: 'pipe',
@@ -69,6 +80,7 @@ export const OutputCheckCompletion: CompletionPlugin = {
       return exitCode === 0;
     } finally {
       clearTimeout(timer);
+      if (ctx.signal) ctx.signal.removeEventListener('abort', onAbort);
     }
   },
 };

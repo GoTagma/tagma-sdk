@@ -88,13 +88,23 @@ function preflight(config: PipelineConfig, dag: Dag): void {
 }
 
 function resolveRefInDag(dag: Dag, ref: string, fromTrackId: string): string | null {
+  // Already fully qualified
   if (dag.nodes.has(ref)) return ref;
+  // Same-track match (preferred)
   const sameTrack = `${fromTrackId}.${ref}`;
   if (dag.nodes.has(sameTrack)) return sameTrack;
+  // Cross-track bare name lookup — must be unambiguous (aligned with buildDag's resolveRef)
+  let match: string | null = null;
   for (const [id] of dag.nodes) {
-    if (id.endsWith(`.${ref}`)) return id;
+    if (id.endsWith(`.${ref}`)) {
+      if (match !== null) {
+        // Ambiguous: multiple tasks share the bare name across tracks
+        return null;
+      }
+      match = id;
+    }
   }
-  return null;
+  return match;
 }
 
 // ═══ Engine ═══
@@ -187,6 +197,9 @@ export async function runPipeline(
       text: record.text,
     });
   });
+
+  try {
+
   log.info('[pipeline]', `start "${config.name}" run_id=${runId}`);
 
   // File-only: dump the resolved pipeline shape + DAG topology for post-mortem.
@@ -219,8 +232,6 @@ export async function runPipeline(
       finishedAt: null,
     });
   }
-
-  try {
 
   // Pipeline start hook (gate)
   const startHook = await executeHook(
@@ -274,15 +285,15 @@ export async function runPipeline(
   });
 
   // Wire external cancel signal into the internal abort controller.
+  const externalAbortHandler = () => {
+    pipelineAborted = true;
+    abortController.abort();
+  };
   if (options.signal) {
     if (options.signal.aborted) {
-      pipelineAborted = true;
-      abortController.abort();
+      externalAbortHandler();
     } else {
-      options.signal.addEventListener('abort', () => {
-        pipelineAborted = true;
-        abortController.abort();
-      }, { once: true });
+      options.signal.addEventListener('abort', externalAbortHandler, { once: true });
     }
   }
 
@@ -367,7 +378,7 @@ export async function runPipeline(
 
   async function fireHook(taskId: string, event: 'task_success' | 'task_failure'): Promise<void> {
     await executeHook(config.hooks, event,
-      buildTaskContext(event, pipelineInfo, trackInfoOf(taskId), buildTaskInfoObj(taskId)), workDir);
+      buildTaskContext(event, pipelineInfo, trackInfoOf(taskId), buildTaskInfoObj(taskId)), workDir, abortController.signal);
   }
 
   // ── Process a single task ──
@@ -429,7 +440,7 @@ export async function runPipeline(
 
     // 3. task_start hook (gate)
     const hookResult = await executeHook(config.hooks, 'task_start',
-      buildTaskContext('task_start', pipelineInfo, trackInfoOf(taskId), buildTaskInfoObj(taskId)), workDir);
+      buildTaskContext('task_start', pipelineInfo, trackInfoOf(taskId), buildTaskInfoObj(taskId)), workDir, abortController.signal);
     if (hookResult.exitCode !== 0 || config.hooks?.task_start) {
       log.debug(`[task:${taskId}]`,
         `task_start hook exit=${hookResult.exitCode} allowed=${hookResult.allowed}`);
@@ -521,7 +532,7 @@ export async function runPipeline(
         terminalStatus = 'failed';
       } else if (task.completion) {
         const plugin = getHandler<CompletionPlugin>('completions', task.completion.type);
-        const completionCtx = { workDir: task.cwd ?? workDir };
+        const completionCtx = { workDir: task.cwd ?? workDir, signal: abortController.signal };
         const passed = await plugin.check(task.completion as Record<string, unknown>, result, completionCtx);
         terminalStatus = passed ? 'success' : 'failed';
       } else {
@@ -670,6 +681,11 @@ export async function runPipeline(
     }
   } finally {
     if (pipelineTimer) clearTimeout(pipelineTimer);
+    // Clean up the external abort signal listener to prevent dead references
+    // accumulating on long-lived shared AbortControllers.
+    if (options.signal) {
+      options.signal.removeEventListener('abort', externalAbortHandler);
+    }
     // Safety net: drain any approvals still pending at shutdown (e.g. crash path).
     if (approvalGateway.pending().length > 0) {
       approvalGateway.abortAll('pipeline finished');
@@ -720,10 +736,10 @@ export async function runPipeline(
     log.quiet(`  ${state.status.padEnd(8)} ${id}  (exit=${exit}, ${dur})`);
   }
 
-  console.log(`\n[Pipeline "${config.name}"] completed`);
-  console.log(`  Total: ${summary.total} | Success: ${summary.success} | Failed: ${summary.failed} | Skipped: ${summary.skipped} | Timeout: ${summary.timeout} | Blocked: ${summary.blocked}`);
-  console.log(`  Duration: ${(durationMs / 1000).toFixed(1)}s`);
-  console.log(`  Log: ${log.path}`);
+  log.info('[pipeline]', `completed "${config.name}"`);
+  log.info('[pipeline]', `Total: ${summary.total} | Success: ${summary.success} | Failed: ${summary.failed} | Skipped: ${summary.skipped} | Timeout: ${summary.timeout} | Blocked: ${summary.blocked}`);
+  log.info('[pipeline]', `Duration: ${(durationMs / 1000).toFixed(1)}s`);
+  log.info('[pipeline]', `Log: ${log.path}`);
 
   emit({ type: 'pipeline_end', runId, success: allSuccess });
   return { success: allSuccess, runId, logPath: log.path, summary, states: freezeStates(states) };

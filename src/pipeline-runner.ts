@@ -61,6 +61,15 @@ export class PipelineRunner {
   start(): Promise<EngineResult> {
     if (this._result) return this._result;
 
+    // Guard: if abort() was called before start(), the signal is already
+    // aborted. Create a fresh controller so the pipeline doesn't terminate
+    // immediately. If users truly want pre-abort semantics, they call
+    // abort() after start().
+    if (this._abortController.signal.aborted) {
+      this._abortController = new AbortController();
+      this._status = 'idle';
+    }
+
     this._status = 'running';
     this._result = runPipeline(this.config, this.workDir, {
       ...this.opts,

@@ -41,19 +41,26 @@ export const ManualTrigger: TriggerPlugin = {
     // so instead we race against an abort promise and let engine status logic
     // fall back to pipelineAborted → skipped. abortAll() on gateway still runs
     // from engine shutdown path to clean up any truly-pending entries.
+    const onAbort = () => {};
     const abortPromise = new Promise<never>((_, reject) => {
       if (ctx.signal.aborted) {
         reject(new Error('Pipeline aborted'));
         return;
       }
-      ctx.signal.addEventListener(
-        'abort',
-        () => reject(new Error('Pipeline aborted')),
-        { once: true },
-      );
+      const handler = () => reject(new Error('Pipeline aborted'));
+      // Store reference so we can remove it after the race settles.
+      (onAbort as { handler?: () => void }).handler = handler;
+      ctx.signal.addEventListener('abort', handler, { once: true });
     });
 
-    const decision = await Promise.race([decisionPromise, abortPromise]);
+    let decision: Awaited<typeof decisionPromise>;
+    try {
+      decision = await Promise.race([decisionPromise, abortPromise]);
+    } finally {
+      // Clean up the abort listener to prevent leaking on normal completion.
+      const handler = (onAbort as { handler?: () => void }).handler;
+      if (handler) ctx.signal.removeEventListener('abort', handler);
+    }
 
     switch (decision.outcome) {
       case 'approved':

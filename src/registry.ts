@@ -37,8 +37,20 @@ export function hasHandler(category: PluginCategory, type: string): boolean {
   return registries[category].has(type);
 }
 
+// Plugin name must be a scoped npm package or a tagma-prefixed package.
+// Reject absolute/relative paths and suspicious patterns to prevent
+// arbitrary code execution via crafted YAML configs.
+const PLUGIN_NAME_RE = /^(@[a-z0-9-]+\/[a-z0-9._-]+|tagma-plugin-[a-z0-9._-]+)$/;
+
 export async function loadPlugins(pluginNames: readonly string[]): Promise<void> {
   for (const name of pluginNames) {
+    if (!PLUGIN_NAME_RE.test(name)) {
+      throw new Error(
+        `Plugin "${name}" rejected: plugin names must be scoped npm packages ` +
+        `(e.g. @tagma/trigger-xyz) or tagma-plugin-* packages. ` +
+        `Relative/absolute paths are not allowed.`
+      );
+    }
     const mod = await import(name);
     if (!mod.pluginCategory || !mod.pluginType || !mod.default) {
       throw new Error(

@@ -198,10 +198,15 @@ function expandTemplateTask(
       newTask.continue_from = `${instanceId}.${task.continue_from}`;
     }
 
-    // Rewrite output path to instance namespace
+    // Rewrite output path to instance namespace so parallel template
+    // instances don't collide on the same file. Handles any relative path
+    // (e.g. ./tmp/foo, ./output/bar, ./build/result.json) by injecting
+    // the instanceId as the first directory component after `./`.
     if (task.output) {
       const original = interpolate(task.output);
-      newTask.output = original.replace('./tmp/', `./tmp/${instanceId}/`);
+      newTask.output = original.startsWith('./')
+        ? `./${instanceId}/${original.slice(2)}`
+        : `${instanceId}/${original}`;
     }
 
     return newTask as unknown as RawTaskConfig;

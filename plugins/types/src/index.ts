@@ -313,6 +313,7 @@ export interface TriggerPlugin {
 
 export interface CompletionContext {
   readonly workDir: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface CompletionPlugin {

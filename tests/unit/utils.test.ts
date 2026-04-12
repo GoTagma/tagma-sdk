@@ -35,8 +35,14 @@ describe('parseDuration', () => {
     expect(() => parseDuration('500ms')).toThrow('Invalid duration');
   });
 
-  it('throws on days (unsupported unit)', () => {
-    expect(() => parseDuration('5d')).toThrow('Invalid duration');
+  it('parses days', () => {
+    expect(parseDuration('5d')).toBe(432_000_000);
+    expect(parseDuration('1d')).toBe(86_400_000);
+  });
+
+  it('parses leading-dot durations', () => {
+    expect(parseDuration('.5s')).toBe(500);
+    expect(parseDuration('.25h')).toBe(900_000);
   });
 
   it('throws on bare number without unit', () => {

@@ -18,42 +18,71 @@ function normalizeCommands(cmd: HookCommand | undefined): readonly string[] {
   return cmd;
 }
 
-async function runSingleHook(command: string, context: unknown, cwd?: string): Promise<number> {
+const DEFAULT_HOOK_TIMEOUT_MS = 30_000;
+
+async function runSingleHook(
+  command: string,
+  context: unknown,
+  cwd?: string,
+  signal?: AbortSignal,
+  timeoutMs: number = DEFAULT_HOOK_TIMEOUT_MS,
+): Promise<number> {
   const jsonInput = JSON.stringify(context, null, 2);
 
-  const proc = Bun.spawn(shellArgs(command) as string[], {
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    ...(cwd ? { cwd } : {}),
-  });
+  const controller = new AbortController();
+  const timer = timeoutMs > 0
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
 
-  if (proc.stdin) {
-    try {
-      proc.stdin.write(jsonInput);
-      proc.stdin.end();
-    } catch {
-      // Process may exit before reading stdin (e.g. `exit 1`), ignore EPIPE
+  // Wire pipeline abort signal into hook process
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
     }
   }
 
-  // Consume stdout and stderr concurrently with waiting for exit.
-  // Sequential reads after proc.exited risk a pipe-buffer deadlock when
-  // hook output exceeds the ~64 KB kernel buffer.
-  const [exitCode, stdout, stderr] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  try {
+    const proc = Bun.spawn(shellArgs(command) as string[], {
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      signal: controller.signal,
+      ...(cwd ? { cwd } : {}),
+    });
 
-  if (stdout.trim()) {
-    console.log(`[hook: ${command}] stdout: ${stdout.trim()}`);
-  }
-  if (stderr.trim()) {
-    console.error(`[hook: ${command}] stderr: ${stderr.trim()}`);
-  }
+    if (proc.stdin) {
+      try {
+        proc.stdin.write(jsonInput);
+        proc.stdin.end();
+      } catch {
+        // Process may exit before reading stdin (e.g. `exit 1`), ignore EPIPE
+      }
+    }
 
-  return exitCode;
+    // Consume stdout and stderr concurrently with waiting for exit.
+    // Sequential reads after proc.exited risk a pipe-buffer deadlock when
+    // hook output exceeds the ~64 KB kernel buffer.
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+
+    if (stdout.trim()) {
+      console.log(`[hook: ${command}] stdout: ${stdout.trim()}`);
+    }
+    if (stderr.trim()) {
+      console.error(`[hook: ${command}] stderr: ${stderr.trim()}`);
+    }
+
+    return exitCode;
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onAbort);
+  }
 }
 
 export async function executeHook(
@@ -61,6 +90,7 @@ export async function executeHook(
   event: HookEvent,
   context: unknown,
   workDir?: string,
+  signal?: AbortSignal,
 ): Promise<HookResult> {
   if (!hooks) return { allowed: true, exitCode: 0 };
 
@@ -70,7 +100,7 @@ export async function executeHook(
   const isGate = GATE_HOOKS.has(event);
 
   for (const cmd of commands) {
-    const exitCode = await runSingleHook(cmd, context, workDir);
+    const exitCode = await runSingleHook(cmd, context, workDir, signal);
 
     if (isGate && exitCode === 1) {
       // Only exit code 1 has gate semantics (block execution)

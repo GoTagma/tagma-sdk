@@ -118,8 +118,10 @@ export function buildDag(config: PipelineConfig): Dag {
   }
 
   const sorted: string[] = [];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
+  // Use an index pointer instead of shift() to avoid O(n) per dequeue.
+  let qi = 0;
+  while (qi < queue.length) {
+    const current = queue[qi++]!;
     sorted.push(current);
     for (const child of adjacency.get(current)!) {
       const newDegree = inDegree.get(child)! - 1;
@@ -129,8 +131,13 @@ export function buildDag(config: PipelineConfig): Dag {
   }
 
   if (sorted.length !== nodes.size) {
-    const remaining = [...nodes.keys()].filter(id => !sorted.includes(id));
-    throw new Error(`Circular dependency detected involving tasks: ${remaining.join(', ')}`);
+    // Only report nodes that are actually part of cycles (in-degree > 0
+    // after Kahn's algorithm), not their downstream dependents.
+    const sortedSet = new Set(sorted);
+    const cycleMembers = [...nodes.keys()].filter(id =>
+      !sortedSet.has(id) && (inDegree.get(id) ?? 0) > 0
+    );
+    throw new Error(`Circular dependency detected involving tasks: ${cycleMembers.join(', ')}`);
   }
 
   return { nodes, sorted };

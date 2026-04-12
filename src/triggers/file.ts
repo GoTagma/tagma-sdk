@@ -1,5 +1,6 @@
 import { watch } from 'chokidar';
 import { resolve, dirname } from 'path';
+import { mkdir } from 'fs/promises';
 import type { TriggerPlugin, TriggerContext } from '../types';
 import { parseDuration, validatePath } from '../utils';
 
@@ -35,7 +36,7 @@ export const FileTrigger: TriggerPlugin = {
     const safePath = validatePath(filePath, ctx.workDir);
     const timeoutMs = config.timeout != null ? parseDuration(String(config.timeout)) : 0;
 
-    return new Promise((resolve_p, reject) => {
+    return new Promise(async (resolve_p, reject) => {
       if (ctx.signal.aborted) {
         reject(new Error('Pipeline aborted'));
         return;
@@ -44,7 +45,13 @@ export const FileTrigger: TriggerPlugin = {
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
 
+      // Ensure the parent directory exists so the watcher doesn't fail
+      // with ENOENT for nested paths like `build/output/result.json`.
       const dir = dirname(safePath);
+      try {
+        await mkdir(dir, { recursive: true });
+      } catch { /* best effort — dir may already exist */ }
+
       const watcher = watch(dir, {
         ignoreInitial: true,
         depth: 0,

@@ -1,12 +1,12 @@
 import { resolve, relative } from 'path';
 import { randomBytes } from 'crypto';
 
-const DURATION_RE = /^(\d+(?:\.\d+)?)\s*(s|m|h)$/;
+const DURATION_RE = /^(\d*\.?\d+)\s*(s|m|h|d)$/;
 
 export function parseDuration(input: string): number {
   const match = DURATION_RE.exec(input.trim());
   if (!match) {
-    throw new Error(`Invalid duration format: "${input}". Expected format: <number>(s|m|h)`);
+    throw new Error(`Invalid duration format: "${input}". Expected format: <number>(s|m|h|d)`);
   }
   const value = parseFloat(match[1]);
   const unit = match[2];
@@ -14,6 +14,7 @@ export function parseDuration(input: string): number {
     case 's': return value * 1000;
     case 'm': return value * 60_000;
     case 'h': return value * 3_600_000;
+    case 'd': return value * 86_400_000;
     default:  throw new Error(`Unknown duration unit: "${unit}"`);
   }
 }
@@ -136,8 +137,13 @@ export function shellArgs(command: string): readonly string[] {
 /** Quote a single argument for inclusion in a shell command string. */
 function quoteArg(arg: string): string {
   if (!/[\s"'\\<>|&;`$!^%]/.test(arg)) return arg;
-  // Double-quote and escape embedded double quotes + backslashes
-  return '"' + arg.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  if (IS_WINDOWS) {
+    // On Windows (cmd.exe), double-quote and escape embedded quotes + backslashes
+    return '"' + arg.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  }
+  // On Unix, use single quotes to prevent $variable expansion.
+  // Escape embedded single quotes via the '\'' idiom.
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
 }
 
 /**

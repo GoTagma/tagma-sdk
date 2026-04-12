@@ -201,10 +201,13 @@ function detectCycles(
   // Canonical key = sorted node list joined — order-independent fingerprint.
   const seenCycles = new Set<string>();
 
-  function dfs(id: string, path: string[]): void {
+  // Use a mutable path array instead of copying at each level (O(n) vs O(n^2)).
+  const pathStack: string[] = [];
+
+  function dfs(id: string): void {
     if (inStack.has(id)) {
-      const cycleStart = path.indexOf(id);
-      const cycleNodes = [...path.slice(cycleStart), id];
+      const cycleStart = pathStack.indexOf(id);
+      const cycleNodes = [...pathStack.slice(cycleStart), id];
       const key = [...cycleNodes].sort().join(',');
       if (!seenCycles.has(key)) {
         seenCycles.add(key);
@@ -215,14 +218,16 @@ function detectCycles(
     if (visited.has(id)) return;
     visited.add(id);
     inStack.add(id);
+    pathStack.push(id);
     for (const dep of adj.get(id) ?? []) {
-      dfs(dep, [...path, id]);
+      dfs(dep);
     }
+    pathStack.pop();
     inStack.delete(id);
   }
 
   for (const id of adj.keys()) {
-    if (!visited.has(id)) dfs(id, []);
+    if (!visited.has(id)) dfs(id);
   }
 
   return errors;
