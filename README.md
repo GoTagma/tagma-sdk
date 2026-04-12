@@ -326,6 +326,20 @@ Properties:
 - `runId` — engine-assigned run ID, available after the first `pipeline_start` event (`null` until then)
 - `status` — `'idle' | 'running' | 'done' | 'aborted'`
 
+### `TriggerBlockedError` / `TriggerTimeoutError`
+
+Typed error classes for trigger plugin error classification. The engine uses `instanceof` checks on these to set the correct task status (`blocked` or `timeout`) instead of matching on error message substrings.
+
+Built-in triggers (`manual`, `file`) throw these automatically. Third-party trigger plugins should throw `TriggerBlockedError` for user/policy rejections and `TriggerTimeoutError` for genuine wait timeouts. Plugins that throw plain `Error` still work — the engine falls back to string matching for backward compatibility, but typed errors are preferred to avoid misclassification from coincidental substrings.
+
+```ts
+import { TriggerBlockedError, TriggerTimeoutError } from '@tagma/sdk';
+
+// In a custom trigger plugin:
+throw new TriggerBlockedError('Access denied by policy');
+throw new TriggerTimeoutError('File did not appear within 30s');
+```
+
 ### `loadPlugins(names: string[]): Promise<void>`
 
 Dynamically loads and registers external plugin packages.
