@@ -16,7 +16,7 @@ import {
   buildPipelineCompleteContext, buildPipelineErrorContext,
   type PipelineInfo, type TrackInfo, type TaskInfo,
 } from './hooks';
-import { Logger, tailLines, clip } from './logger';
+import { Logger, tailLines, clip, type LogLevel } from './logger';
 import { InMemoryApprovalGateway, type ApprovalGateway } from './approval';
 
 // ═══ Preflight Validation ═══
@@ -115,7 +115,15 @@ export interface EngineResult {
 export type PipelineEvent =
   | { readonly type: 'task_status_change'; readonly taskId: string; readonly status: TaskStatus; readonly prevStatus: TaskStatus; readonly runId: string; readonly state: TaskState }
   | { readonly type: 'pipeline_start'; readonly runId: string; readonly states: ReadonlyMap<string, TaskState> }
-  | { readonly type: 'pipeline_end'; readonly runId: string; readonly success: boolean };
+  | { readonly type: 'pipeline_end'; readonly runId: string; readonly success: boolean }
+  /**
+   * Fine-grained log line emitted alongside every write to pipeline.log.
+   * Consumers use this to stream the full run process into UIs without
+   * tailing the log file. `taskId` is non-null for task-scoped lines and
+   * null for pipeline-wide messages (e.g. configuration dumps, DAG
+   * topology, pipeline start/end).
+   */
+  | { readonly type: 'task_log'; readonly runId: string; readonly taskId: string | null; readonly level: LogLevel; readonly timestamp: string; readonly text: string };
 
 export interface RunPipelineOptions {
   readonly approvalGateway?: ApprovalGateway;
@@ -160,7 +168,19 @@ export async function runPipeline(
 
   const startedAt = nowISO();
   const pipelineInfo: PipelineInfo = { name: config.name, run_id: runId, started_at: startedAt };
-  const log = new Logger(workDir, runId);
+  // Forward every structured log line to subscribers as task_log events.
+  // Reading options.onEvent inside the callback (vs. capturing it once) keeps
+  // the SDK behavior correct if callers pass a fresh onEvent on each run.
+  const log = new Logger(workDir, runId, (record) => {
+    options.onEvent?.({
+      type: 'task_log',
+      runId,
+      taskId: record.taskId,
+      level: record.level,
+      timestamp: record.timestamp,
+      text: record.text,
+    });
+  });
   log.info('[pipeline]', `start "${config.name}" run_id=${runId}`);
 
   // File-only: dump the resolved pipeline shape + DAG topology for post-mortem.
@@ -352,7 +372,7 @@ export async function runPipeline(
     const task = node.task;
     const track = node.track;
 
-    log.section(`Task ${taskId}`);
+    log.section(`Task ${taskId}`, taskId);
     log.debug(`[task:${taskId}]`,
       `type=${task.prompt ? 'ai' : 'cmd'} track=${track.id} deps=[${node.dependsOn.join(', ') || '(root)'}]`);
 
@@ -469,7 +489,7 @@ export async function runPipeline(
         }
         log.debug(`[task:${taskId}]`,
           `prompt: ${originalLen} chars (final: ${prompt.length} chars)`);
-        log.quiet(`--- prompt (final) ---\n${clip(prompt)}\n--- end prompt ---`);
+        log.quiet(`--- prompt (final) ---\n${clip(prompt)}\n--- end prompt ---`, taskId);
 
         const enrichedTask: TaskConfig = { ...task, prompt };
         const driverCtx: DriverContext = {
@@ -565,10 +585,10 @@ export async function runPipeline(
         log.debug(`[task:${taskId}]`, `wrote stderr: ${result.stderrPath}`);
       }
       if (result.stdout) {
-        log.quiet(`--- stdout (${taskId}) ---\n${clip(result.stdout)}\n--- end stdout ---`);
+        log.quiet(`--- stdout (${taskId}) ---\n${clip(result.stdout)}\n--- end stdout ---`, taskId);
       }
       if (result.stderr) {
-        log.quiet(`--- stderr (${taskId}) ---\n${clip(result.stderr)}\n--- end stderr ---`);
+        log.quiet(`--- stderr (${taskId}) ---\n${clip(result.stderr)}\n--- end stderr ---`, taskId);
       }
       if (task.completion) {
         log.debug(`[task:${taskId}]`,

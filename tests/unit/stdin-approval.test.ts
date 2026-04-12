@@ -65,7 +65,7 @@ describe('StdinApprovalAdapter — queue skip', () => {
     //   3. processNext checks gateway.pending() → empty → skips without readline
     gw.subscribe((ev) => {
       if (ev.type === 'requested') {
-        gw.resolve(ev.request.id, { outcome: 'approved', choice: 'approve', actor: 'auto' });
+        gw.resolve(ev.request.id, { outcome: 'approved', actor: 'auto' });
       }
     });
 

@@ -43,34 +43,23 @@ export function attachStdinApprovalAdapter(gateway: ApprovalGateway): StdinAppro
         // If the request was already resolved by another path while queued, skip it.
         if (!gateway.pending().some((p) => p.id === req.id)) continue;
 
-        const optionsStr = req.options.join(' / ');
         process.stdout.write(
           `\n[APPROVAL REQUIRED] ${req.message}\n` +
             `  id:      ${req.id}\n` +
             `  task:    ${req.taskId}${req.trackId ? ` (track: ${req.trackId})` : ''}\n` +
-            `  options: ${optionsStr}\n` +
-            `  > `,
+            `  approve / reject > `,
         );
 
         const input = (await readOneLine()).trim().toLowerCase();
 
         const approveAliases = new Set(['approve', 'yes', 'y', 'ok', 'true', '1']);
         const rejectAliases = new Set(['reject', 'no', 'n', 'deny', 'false', '0']);
-        const matchedOption = req.options.find((o) => o.toLowerCase() === input);
 
-        if (matchedOption) {
-          const isReject = rejectAliases.has(matchedOption.toLowerCase());
-          gateway.resolve(req.id, {
-            outcome: isReject ? 'rejected' : 'approved',
-            choice: matchedOption,
-            actor: 'cli',
-          });
-        } else if (approveAliases.has(input)) {
-          gateway.resolve(req.id, { outcome: 'approved', choice: input, actor: 'cli' });
+        if (approveAliases.has(input)) {
+          gateway.resolve(req.id, { outcome: 'approved', actor: 'cli' });
         } else if (rejectAliases.has(input)) {
           gateway.resolve(req.id, {
             outcome: 'rejected',
-            choice: input,
             actor: 'cli',
             reason: 'user rejected via CLI',
           });

@@ -118,7 +118,6 @@ pipeline:
           trigger:
             type: manual
             message: "Approve before running"
-            options: [approve, reject]
             timeout: 5m
           completion:
             type: exit_code
@@ -224,7 +223,6 @@ Track-level `middlewares` apply to all tasks in the track. Setting task-level `m
 |---|---|---|---|---|
 | `type` | `"manual"` | Yes | — | Trigger type |
 | `message` | `string` | No | `"Manual confirmation required for task \"{taskId}\""` | Message shown to the approver |
-| `options` | `string[]` | No | — | Choice options (e.g. `[approve, reject]`) |
 | `timeout` | `string` | No | — | How long to wait for a decision before timing out |
 | `metadata` | `object` | No | — | Arbitrary metadata passed to the approval gateway |
 
@@ -296,6 +294,7 @@ Options:
 - `onEvent` -- callback for real-time `PipelineEvent` updates:
   - `pipeline_start` — pipeline began; includes `states: ReadonlyMap<taskId, TaskState>` (initial snapshot of all tasks at `waiting`)
   - `task_status_change` — a task changed status; includes `state: TaskState` (complete snapshot at the time of change: `startedAt` is populated before the `running` event; `result` and `finishedAt` are populated before any terminal-status event)
+  - `task_log` — a structured log line was written to `pipeline.log`. Mirrors every `Logger` call (info/warn/error/debug/section/quiet) and carries `{ taskId: string | null, level, timestamp, text }`. `taskId` is non-null for lines tagged with a `[task:<id>]` prefix (or passed explicitly to `section`/`quiet`) and `null` for pipeline-wide messages such as the configuration dump and DAG topology. Use this to stream the full run process into UIs without tailing the log file.
   - `pipeline_end` — pipeline finished; includes `success: boolean`
 - `maxLogRuns` -- number of per-run log directories to keep under `<workDir>/.tagma/logs/` (default: 20)
 
@@ -506,9 +505,31 @@ logger.warn('[track]', 'message');   // console + file
 logger.error('[track]', 'message');  // console + file
 logger.debug('[track]', 'message');  // file only
 logger.section('Title');             // file only — visual separator
-logger.quiet(bulkText);             // file only — bulk payload
-logger.path;                        // log file path
-logger.dir;                         // run artifact directory
+logger.quiet(bulkText);              // file only — bulk payload
+logger.path;                         // log file path
+logger.dir;                          // run artifact directory
+```
+
+Pass an optional third argument to stream every appended line out as a
+structured `LogRecord` — `runPipeline` uses this to emit `task_log` events:
+
+```ts
+import { Logger, type LogRecord } from '@tagma/sdk';
+
+const logger = new Logger(workDir, runId, (record: LogRecord) => {
+  // record = { level, taskId, timestamp, text }
+  // level  = 'info' | 'warn' | 'error' | 'debug' | 'section' | 'quiet'
+  // taskId is extracted from a '[task:<id>]' prefix, or null for untagged lines
+  forwardToUI(record);
+});
+```
+
+`section` and `quiet` carry no prefix, so pass an explicit `taskId` when the
+line logically belongs to a task — the extractor cannot infer one otherwise:
+
+```ts
+logger.section(`Task ${taskId}`, taskId);
+logger.quiet(`--- stdout (${taskId}) ---\n${body}\n--- end stdout ---`, taskId);
 ```
 
 ### `tailLines(text: string, n: number): string`

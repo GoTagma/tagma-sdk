@@ -16,7 +16,6 @@ pipeline:
           trigger:
             type: manual
             message: Approve quick smoke test
-            options: [approve, reject]
             timeout: 5s
           command: bun ../../helpers/echo.ts MANUAL_TRIGGER_OK
           completion:

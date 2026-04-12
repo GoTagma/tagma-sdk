@@ -192,7 +192,6 @@ describe('WebSocketApprovalAdapter — resolve flow', () => {
       type: 'resolve',
       approvalId: capturedId,
       outcome: 'approved',
-      choice: 'approve',
       actor: 'test-client',
     }));
 

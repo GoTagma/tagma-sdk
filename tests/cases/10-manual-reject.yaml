@@ -13,6 +13,5 @@ pipeline:
           trigger:
             type: manual
             message: This will be auto-rejected by the test runner
-            options: [approve, reject]
             timeout: 5s
           command: bun ../../helpers/echo.ts SHOULD_NOT_RUN_REJECTED

@@ -16,7 +16,7 @@ import type { ApprovalGateway, ApprovalEvent } from '../approval';
 //
 // Protocol — client → server:
 //   { type: 'resolve', approvalId: string, outcome: 'approved'|'rejected',
-//     choice?: string, actor?: string, reason?: string }
+//     actor?: string, reason?: string }
 
 export interface WebSocketApprovalAdapterOptions {
   port?: number;      // default: 3000
@@ -123,7 +123,6 @@ export function attachWebSocketApprovalAdapter(
 
         const ok = gateway.resolve(msg.approvalId, {
           outcome: msg.outcome,
-          choice: msg.choice,
           actor: msg.actor ?? 'websocket',
           reason: msg.reason,
         });
@@ -159,7 +158,6 @@ interface ResolveMessage {
   type: 'resolve';
   approvalId: string;
   outcome: 'approved' | 'rejected';
-  choice?: string;
   actor?: string;
   reason?: string;
 }

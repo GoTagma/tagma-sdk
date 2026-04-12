@@ -63,6 +63,7 @@ export type { WebSocketApprovalAdapter, WebSocketApprovalAdapterOptions } from '
 
 // ── Logger ──
 export { Logger, tailLines, clip } from './logger';
+export type { LogRecord, LogLevel, LogListener } from './logger';
 
 // ── Hook context types (useful for frontend display) ──
 export type { HookResult, PipelineInfo, TrackInfo, TaskInfo } from './hooks';

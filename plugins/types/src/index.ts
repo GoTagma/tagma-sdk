@@ -259,7 +259,6 @@ export interface ApprovalRequest {
   readonly taskId: string;
   readonly trackId?: string;
   readonly message: string;
-  readonly options: readonly string[];
   readonly createdAt: string;
   readonly timeoutMs: number;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -270,7 +269,6 @@ export type ApprovalOutcome = 'approved' | 'rejected' | 'timeout' | 'aborted';
 export interface ApprovalDecision {
   readonly approvalId: string;
   readonly outcome: ApprovalOutcome;
-  readonly choice?: string;
   readonly actor?: string;
   readonly reason?: string;
   readonly decidedAt: string;
@@ -285,7 +283,7 @@ export type ApprovalEvent =
 export type ApprovalListener = (event: ApprovalEvent) => void;
 
 export interface ApprovalGateway {
-  request(req: Omit<ApprovalRequest, 'id' | 'createdAt' | 'options'> & { options?: readonly string[] }): Promise<ApprovalDecision>;
+  request(req: Omit<ApprovalRequest, 'id' | 'createdAt'>): Promise<ApprovalDecision>;
   resolve(
     approvalId: string,
     decision: Omit<ApprovalDecision, 'approvalId' | 'decidedAt'>,

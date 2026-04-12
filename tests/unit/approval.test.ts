@@ -12,7 +12,6 @@ describe('InMemoryApprovalGateway', () => {
         setTimeout(() => {
           gw.resolve(event.request.id, {
             outcome: 'approved',
-            choice: 'approve',
             actor: 'test',
           });
         }, 10);
@@ -27,7 +26,6 @@ describe('InMemoryApprovalGateway', () => {
     });
 
     expect(decision.outcome).toBe('approved');
-    expect(decision.choice).toBe('approve');
     expect(decision.actor).toBe('test');
     expect(decision.approvalId).toBeDefined();
     expect(decision.decidedAt).toBeDefined();
@@ -62,7 +60,6 @@ describe('InMemoryApprovalGateway', () => {
     const gw = new InMemoryApprovalGateway();
     const ok = gw.resolve('nonexistent-id', {
       outcome: 'approved',
-      choice: 'approve',
       actor: 'test',
     });
     expect(ok).toBe(false);
@@ -92,14 +89,12 @@ describe('InMemoryApprovalGateway', () => {
 
     const first = gw.resolve(capturedId, {
       outcome: 'approved',
-      choice: 'approve',
       actor: 'test',
     });
     expect(first).toBe(true);
 
     const second = gw.resolve(capturedId, {
       outcome: 'rejected',
-      choice: 'reject',
       actor: 'test',
     });
     expect(second).toBe(false);
@@ -182,7 +177,6 @@ describe('InMemoryApprovalGateway', () => {
       if (event.type === 'requested') {
         gw.resolve(event.request.id, {
           outcome: 'approved',
-          choice: 'approve',
           actor: 'test',
         });
       }
@@ -234,27 +228,4 @@ describe('InMemoryApprovalGateway', () => {
     expect(count).toBe(countAfterFirst);
   });
 
-  // ── default options ──
-
-  it('uses default options when none provided', async () => {
-    const gw = new InMemoryApprovalGateway();
-
-    gw.subscribe((event) => {
-      if (event.type === 'requested') {
-        expect(event.request.options).toEqual(['approve', 'reject']);
-        gw.resolve(event.request.id, {
-          outcome: 'approved',
-          choice: 'approve',
-          actor: 'test',
-        });
-      }
-    });
-
-    await gw.request({
-      taskId: 'task-1',
-      trackId: 'track-1',
-      message: 'Default options',
-      timeoutMs: 1000,
-    });
-  });
 });

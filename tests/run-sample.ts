@@ -246,13 +246,11 @@ function makeGateway(strategy: ApprovalStrategy): InMemoryApprovalGateway {
           if (strategy === 'approve') {
             gateway.resolve(event.request.id, {
               outcome: 'approved',
-              choice: event.request.options[0] ?? 'approve',
               actor: 'tests/run-sample.ts',
             });
           } else {
             gateway.resolve(event.request.id, {
               outcome: 'rejected',
-              choice: event.request.options[1] ?? 'reject',
               actor: 'tests/run-sample.ts',
               reason: 'auto-rejected by test runner',
             });

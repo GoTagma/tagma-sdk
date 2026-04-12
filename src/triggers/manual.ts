@@ -16,11 +16,6 @@ export const ManualTrigger: TriggerPlugin = {
         description: 'Maximum wait time (e.g. 10m). Omit or 0 to wait indefinitely.',
         placeholder: '10m',
       },
-      options: {
-        type: 'string',
-        description: 'Comma-separated list of choices offered to the approver (e.g. "yes,no,defer").',
-        placeholder: 'yes,no',
-      },
     },
   },
 
@@ -28,9 +23,6 @@ export const ManualTrigger: TriggerPlugin = {
     const message =
       (config.message as string | undefined) ?? `Manual confirmation required for task "${ctx.taskId}"`;
     const timeoutMs = config.timeout ? parseDuration(config.timeout as string) : 0;
-    const options = Array.isArray(config.options)
-      ? (config.options as unknown[]).map(String)
-      : undefined;
     const metadata =
       config.metadata && typeof config.metadata === 'object'
         ? (config.metadata as Record<string, unknown>)
@@ -40,7 +32,6 @@ export const ManualTrigger: TriggerPlugin = {
       taskId: ctx.taskId,
       trackId: ctx.trackId,
       message,
-      options,
       timeoutMs,
       metadata,
     });
@@ -66,7 +57,7 @@ export const ManualTrigger: TriggerPlugin = {
 
     switch (decision.outcome) {
       case 'approved':
-        return { confirmed: true, approvalId: decision.approvalId, choice: decision.choice, actor: decision.actor };
+        return { confirmed: true, approvalId: decision.approvalId, actor: decision.actor };
       case 'rejected':
         throw new Error(
           `Manual trigger rejected by ${decision.actor ?? 'user'}` +
