@@ -370,3 +370,31 @@ export interface PluginModule {
   readonly pluginType: string;
   readonly default: DriverPlugin | TriggerPlugin | CompletionPlugin | MiddlewarePlugin;
 }
+
+/**
+ * Manifest a plugin package MUST declare under the `tagmaPlugin` field of
+ * its `package.json`. The presence of this field is the canonical signal
+ * that a package is a tagma pipeline plugin (not a library, template, or
+ * unrelated helper sharing the same npm scope). Auto-discovery in hosts
+ * reads only `package.json` and trusts this field — no module import
+ * required, which is both faster and safer (no top-level side effects).
+ *
+ * The manifest MUST stay in sync with the runtime exports (`pluginCategory`,
+ * `pluginType`). Hosts may verify this on load and refuse to register a
+ * plugin whose package.json and runtime contract disagree.
+ *
+ * Example `package.json`:
+ *
+ *     {
+ *       "name": "@tagma/driver-codex",
+ *       "version": "0.1.7",
+ *       "tagmaPlugin": {
+ *         "category": "drivers",
+ *         "type": "codex"
+ *       }
+ *     }
+ */
+export interface PluginManifest {
+  readonly category: PluginCategory;
+  readonly type: string;
+}

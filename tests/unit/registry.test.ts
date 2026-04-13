@@ -8,6 +8,7 @@ import {
   loadPlugins,
   isValidPluginName,
   PLUGIN_NAME_RE,
+  readPluginManifest,
 } from '../../src/registry';
 import type {
   CompletionPlugin,
@@ -244,5 +245,73 @@ describe('isValidPluginName', () => {
   it('PLUGIN_NAME_RE is exported and matches the same rules', () => {
     expect(PLUGIN_NAME_RE.test('@tagma/driver-codex')).toBe(true);
     expect(PLUGIN_NAME_RE.test('./local')).toBe(false);
+  });
+});
+
+// ── readPluginManifest ──
+//
+// The `tagmaPlugin` package.json field is the canonical signal that an
+// installed package is a tagma plugin. These tests cover the parser
+// contract that hosts rely on for auto-discovery.
+
+describe('readPluginManifest', () => {
+  it('returns null when tagmaPlugin field is absent', () => {
+    expect(readPluginManifest({ name: '@tagma/sdk', version: '0.3.8' })).toBeNull();
+    expect(readPluginManifest({})).toBeNull();
+  });
+
+  it('returns null for non-object input (defensive)', () => {
+    expect(readPluginManifest(null)).toBeNull();
+    expect(readPluginManifest(undefined)).toBeNull();
+    expect(readPluginManifest('not a package json')).toBeNull();
+    expect(readPluginManifest(42)).toBeNull();
+  });
+
+  it('parses a well-formed manifest for each category', () => {
+    expect(readPluginManifest({
+      tagmaPlugin: { category: 'drivers', type: 'codex' },
+    })).toEqual({ category: 'drivers', type: 'codex' });
+
+    expect(readPluginManifest({
+      tagmaPlugin: { category: 'triggers', type: 'github' },
+    })).toEqual({ category: 'triggers', type: 'github' });
+
+    expect(readPluginManifest({
+      tagmaPlugin: { category: 'completions', type: 'output_check' },
+    })).toEqual({ category: 'completions', type: 'output_check' });
+
+    expect(readPluginManifest({
+      tagmaPlugin: { category: 'middlewares', type: 'static_context' },
+    })).toEqual({ category: 'middlewares', type: 'static_context' });
+  });
+
+  it('throws when category is missing or not one of the four', () => {
+    expect(() => readPluginManifest({
+      tagmaPlugin: { type: 'codex' },
+    })).toThrow(/category/);
+    expect(() => readPluginManifest({
+      tagmaPlugin: { category: 'driver', type: 'codex' }, // singular!
+    })).toThrow(/category/);
+    expect(() => readPluginManifest({
+      tagmaPlugin: { category: 'plugins', type: 'codex' },
+    })).toThrow(/category/);
+  });
+
+  it('throws when type is missing or empty', () => {
+    expect(() => readPluginManifest({
+      tagmaPlugin: { category: 'drivers' },
+    })).toThrow(/type/);
+    expect(() => readPluginManifest({
+      tagmaPlugin: { category: 'drivers', type: '' },
+    })).toThrow(/type/);
+    expect(() => readPluginManifest({
+      tagmaPlugin: { category: 'drivers', type: 42 },
+    })).toThrow(/type/);
+  });
+
+  it('throws when tagmaPlugin field is present but not an object', () => {
+    expect(() => readPluginManifest({ tagmaPlugin: true })).toThrow(/object/);
+    expect(() => readPluginManifest({ tagmaPlugin: 'codex' })).toThrow(/object/);
+    expect(() => readPluginManifest({ tagmaPlugin: null })).toThrow(/object/);
   });
 });

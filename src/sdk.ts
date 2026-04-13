@@ -51,6 +51,7 @@ export {
   listRegistered,
   isValidPluginName,
   PLUGIN_NAME_RE,
+  readPluginManifest,
 } from './registry';
 export type { RegisterResult } from './registry';
 

@@ -1,6 +1,6 @@
 import type {
   PluginCategory, DriverPlugin, TriggerPlugin,
-  CompletionPlugin, MiddlewarePlugin,
+  CompletionPlugin, MiddlewarePlugin, PluginManifest,
 } from './types';
 
 type PluginType = DriverPlugin | TriggerPlugin | CompletionPlugin | MiddlewarePlugin;
@@ -153,6 +153,41 @@ export const PLUGIN_NAME_RE = /^(@[a-z0-9-]+\/[a-z0-9._-]+|tagma-plugin-[a-z0-9.
 
 export function isValidPluginName(name: unknown): name is string {
   return typeof name === 'string' && PLUGIN_NAME_RE.test(name);
+}
+
+/**
+ * Parse and validate the `tagmaPlugin` field of a `package.json` blob.
+ *
+ * Returns the strongly-typed manifest if the field is present and
+ * well-formed (`category` is one of the four known categories and `type`
+ * is a non-empty string). Returns `null` if the field is absent — that
+ * is the host's signal that the package is a library, not a plugin.
+ *
+ * Throws if the field is present but malformed: that's a packaging bug
+ * the plugin author should hear about loudly, not a silent skip.
+ *
+ * Hosts use this during auto-discovery to decide whether to load a
+ * package as a plugin without having to dynamically `import()` it.
+ */
+export function readPluginManifest(pkgJson: unknown): PluginManifest | null {
+  if (!pkgJson || typeof pkgJson !== 'object') return null;
+  const raw = (pkgJson as Record<string, unknown>).tagmaPlugin;
+  if (raw === undefined) return null;
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('tagmaPlugin field must be an object with { category, type }');
+  }
+  const m = raw as Record<string, unknown>;
+  const category = m.category;
+  const type = m.type;
+  if (typeof category !== 'string' || !VALID_CATEGORIES.has(category as PluginCategory)) {
+    throw new Error(
+      `tagmaPlugin.category must be one of ${[...VALID_CATEGORIES].join(', ')}, got ${JSON.stringify(category)}`
+    );
+  }
+  if (typeof type !== 'string' || type.length === 0) {
+    throw new Error(`tagmaPlugin.type must be a non-empty string, got ${JSON.stringify(type)}`);
+  }
+  return { category: category as PluginCategory, type };
 }
 
 export async function loadPlugins(pluginNames: readonly string[]): Promise<void> {
