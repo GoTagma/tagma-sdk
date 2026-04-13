@@ -98,6 +98,60 @@ describe('runPipeline — preflight validation', () => {
       'nonexistent-completion',
     );
   });
+
+  // ─── skipPluginLoading option ───
+  //
+  // Hosts that pre-load plugins from a custom path (e.g. the editor loading
+  // from a workspace's node_modules) pass skipPluginLoading:true so that the
+  // engine does NOT re-resolve plugin package names via Node's default
+  // cwd-based import. We verify the plumbing by:
+  //
+  //   1. Default behavior: config.plugins references a name that cannot be
+  //      resolved in this repo → loadPlugins throws before preflight.
+  //   2. skipPluginLoading:true: same config → we skip loadPlugins entirely,
+  //      so the error we hit is the normal preflight error (unregistered
+  //      driver), not a module-resolution error. This proves the engine did
+  //      not attempt to import the plugin.
+
+  it('default path attempts to load declared plugins and fails to resolve unknown packages', async () => {
+    const config: PipelineConfig = {
+      name: 'preflight-skip-off',
+      plugins: ['@tagma/definitely-not-installed-xyz'],
+      tracks: [{
+        id: 'tr1',
+        name: 'Track 1',
+        on_failure: 'skip_downstream',
+        tasks: [{ id: 'task-1', name: 'T1', prompt: 'A', driver: 'nonexistent-driver' }],
+      }],
+    };
+
+    let caught: Error | undefined;
+    try {
+      await runPipeline(config, '/tmp');
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).toBeDefined();
+    // Error should come from the import attempt, not from preflight.
+    expect(caught!.message).not.toContain('Preflight validation failed');
+  });
+
+  it('skipPluginLoading:true bypasses loadPlugins and reaches preflight', async () => {
+    const config: PipelineConfig = {
+      name: 'preflight-skip-on',
+      plugins: ['@tagma/definitely-not-installed-xyz'],
+      tracks: [{
+        id: 'tr1',
+        name: 'Track 1',
+        on_failure: 'skip_downstream',
+        tasks: [{ id: 'task-1', name: 'T1', prompt: 'A', driver: 'nonexistent-driver' }],
+      }],
+    };
+
+    await expect(
+      runPipeline(config, '/tmp', { skipPluginLoading: true }),
+    ).rejects.toThrow('Preflight validation failed');
+  });
 });
 
 // ═══ Remaining engine failure-branch gaps (integration-level) ═══

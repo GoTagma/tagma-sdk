@@ -42,7 +42,17 @@ export type { DagNode, Dag, RawDagNode, RawDag } from './dag';
 
 // ── Plugin registry ──
 export { bootstrapBuiltins } from './bootstrap';
-export { loadPlugins, registerPlugin, getHandler, hasHandler, listRegistered } from './registry';
+export {
+  loadPlugins,
+  registerPlugin,
+  unregisterPlugin,
+  getHandler,
+  hasHandler,
+  listRegistered,
+  isValidPluginName,
+  PLUGIN_NAME_RE,
+} from './registry';
+export type { RegisterResult } from './registry';
 
 // ── Approval gateway ──
 export { InMemoryApprovalGateway } from './approval';

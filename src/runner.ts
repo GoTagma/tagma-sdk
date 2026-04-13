@@ -115,6 +115,54 @@ function failResult(stderr: string, durationMs: number): TaskResult {
   };
 }
 
+/**
+ * R2: Validate a SpawnSpec returned by a third-party driver. Returns null on
+ * success or a human-readable error message describing the first violation.
+ *
+ * Catching this here is critical: an undetected bad spec ends up calling
+ * Bun.spawn with garbage and the resulting TypeError leaks into engine
+ * processTask's catch block as "Cannot read properties of undefined". By
+ * validating here we surface a clear "Driver X returned invalid args" message
+ * instead, and short-circuit before holding any process resources.
+ */
+export function validateSpawnSpec(spec: unknown, driverName: string): string | null {
+  if (!spec || typeof spec !== 'object') {
+    return `Driver "${driverName}".buildCommand returned ${spec === null ? 'null' : typeof spec}, expected SpawnSpec object`;
+  }
+  const s = spec as Record<string, unknown>;
+  if (!Array.isArray(s.args)) {
+    return `Driver "${driverName}".buildCommand returned spec.args of type ${typeof s.args}, expected string[]`;
+  }
+  if (s.args.length === 0) {
+    return `Driver "${driverName}".buildCommand returned an empty spec.args array`;
+  }
+  for (let i = 0; i < s.args.length; i++) {
+    if (typeof s.args[i] !== 'string') {
+      return `Driver "${driverName}".buildCommand returned spec.args[${i}] of type ${typeof s.args[i]}, expected string`;
+    }
+  }
+  if (typeof s.args[0] !== 'string' || s.args[0].length === 0) {
+    return `Driver "${driverName}".buildCommand returned an empty executable name in spec.args[0]`;
+  }
+  if (s.cwd !== undefined && typeof s.cwd !== 'string') {
+    return `Driver "${driverName}".buildCommand returned spec.cwd of type ${typeof s.cwd}, expected string or undefined`;
+  }
+  if (s.stdin !== undefined && typeof s.stdin !== 'string') {
+    return `Driver "${driverName}".buildCommand returned spec.stdin of type ${typeof s.stdin}, expected string or undefined`;
+  }
+  if (s.env !== undefined) {
+    if (!s.env || typeof s.env !== 'object' || Array.isArray(s.env)) {
+      return `Driver "${driverName}".buildCommand returned spec.env that is not a plain object`;
+    }
+    for (const [k, v] of Object.entries(s.env as Record<string, unknown>)) {
+      if (typeof v !== 'string') {
+        return `Driver "${driverName}".buildCommand returned spec.env.${k} of type ${typeof v}, expected string`;
+      }
+    }
+  }
+  return null;
+}
+
 export async function runSpawn(
   spec: SpawnSpec,
   driver: DriverPlugin | null,
@@ -123,6 +171,14 @@ export async function runSpawn(
   const { timeoutMs, signal } = opts;
   const start = performance.now();
   const elapsed = () => Math.round(performance.now() - start);
+
+  // R2: validate the spec before touching it. A third-party driver that
+  // returns a malformed SpawnSpec used to crash deep inside Bun.spawn with
+  // an opaque TypeError; now we report a clear "Driver X returned …" message.
+  const validationError = validateSpawnSpec(spec, driver?.name ?? '<unknown>');
+  if (validationError !== null) {
+    return failResult(validationError, elapsed());
+  }
 
   const mergedEnv = { ...process.env, ...(spec.env ?? {}) };
   const resolvedArgs = resolveWindowsExe(
@@ -237,7 +293,41 @@ export async function runSpawn(
   }
 
   // ── 6. Let driver extract metadata ─────────────────────────────────────
-  const meta = driver?.parseResult?.(stdout, stderr) ?? {};
+  // R1: parseResult is third-party code — wrap it in try/catch so a buggy
+  // extractor doesn't discard a perfectly good spawn result. R5: even on
+  // success, type-guard sessionId/normalizedOutput so a mistyped return
+  // value doesn't poison sessionMap/normalizedMap downstream.
+  let sessionId: string | null = null;
+  let normalizedOutput: string | null = null;
+  if (driver?.parseResult) {
+    try {
+      const meta = driver.parseResult(stdout, stderr);
+      if (meta && typeof meta === 'object') {
+        if (typeof meta.sessionId === 'string' && meta.sessionId.length > 0) {
+          sessionId = meta.sessionId;
+        }
+        if (typeof meta.normalizedOutput === 'string') {
+          normalizedOutput = meta.normalizedOutput;
+        }
+      }
+    } catch (err) {
+      // The spawn itself succeeded; only metadata extraction failed.
+      // Fall through with sessionId/normalizedOutput = null and append a
+      // breadcrumb to stderr so the user can see WHY continue_from broke.
+      const msg = err instanceof Error ? err.message : String(err);
+      const note = `\n[runner] driver "${driver.name}".parseResult threw: ${msg}`;
+      return {
+        exitCode,
+        stdout,
+        stderr: stderr + note,
+        outputPath: null,
+        stderrPath: null,
+        durationMs,
+        sessionId: null,
+        normalizedOutput: null,
+      };
+    }
+  }
 
   return {
     exitCode,
@@ -246,8 +336,8 @@ export async function runSpawn(
     outputPath: null,
     stderrPath: null,
     durationMs,
-    sessionId: meta.sessionId ?? null,
-    normalizedOutput: meta.normalizedOutput ?? null,
+    sessionId,
+    normalizedOutput,
   };
 }
 

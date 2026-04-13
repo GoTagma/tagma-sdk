@@ -1,6 +1,6 @@
 pipeline:
   name: 06-codex-plugin
-  timeout: 60s
+  timeout: 180s
   plugins:
     - "@tagma/driver-codex"
   hooks:

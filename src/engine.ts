@@ -178,11 +178,23 @@ export interface RunPipelineOptions {
    * Use for real-time UI updates (e.g. updating a visual workflow graph).
    */
   readonly onEvent?: (event: PipelineEvent) => void;
+  /**
+   * Skip the engine's built-in `loadPlugins(config.plugins)` call.
+   * Use this when the host has already pre-loaded plugins from a custom
+   * resolution path (e.g. a user workspace's node_modules) so the engine
+   * doesn't re-resolve them via Node's default cwd-based import.
+   */
+  readonly skipPluginLoading?: boolean;
 }
 
 // Poll interval when no tasks are in-flight but non-terminal tasks remain
 // (e.g. tasks waiting on a file or manual trigger).
 const POLL_INTERVAL_MS = 50;
+
+// R15: cap on each normalized-output entry stored in normalizedMap so a
+// runaway parseResult can't accumulate hundreds of MB across tasks. 1 MB
+// is generous for any text-context handoff between AI tasks.
+const MAX_NORMALIZED_BYTES = 1_000_000;
 
 export async function runPipeline(
   config: PipelineConfig,
@@ -194,7 +206,10 @@ export async function runPipeline(
 
   // Load any plugins declared in the pipeline config before preflight so that
   // drivers, completions, and middlewares referenced in YAML are registered.
-  if (config.plugins?.length) {
+  // Hosts that pre-load plugins from a custom path (e.g. the editor loading
+  // from the user's workspace node_modules) pass skipPluginLoading: true so
+  // we don't re-resolve via Node's cwd-based default import.
+  if (!options.skipPluginLoading && config.plugins?.length) {
     await loadPlugins(config.plugins);
   }
 
@@ -431,12 +446,43 @@ export async function runPipeline(
       log.debug(`[task:${taskId}]`, `trigger wait: type=${task.trigger.type} ${JSON.stringify(task.trigger)}`);
       try {
         const triggerPlugin = getHandler<TriggerPlugin>('triggers', task.trigger.type);
-        await triggerPlugin.watch(task.trigger as Record<string, unknown>, {
-          taskId: node.taskId,
-          trackId: track.id,
-          workDir: task.cwd ?? workDir,
-          signal: abortController.signal,
-          approvalGateway,
+        // R6: race the plugin's watch() against the pipeline's abort signal.
+        // Third-party triggers may forget to wire up ctx.signal — without
+        // this race, an aborted pipeline would hang forever waiting for the
+        // plugin's watch promise to resolve. The race resolves on whichever
+        // path settles first, and the cleanup paths in finally never run on
+        // the orphaned plugin promise (it's allowed to leak a watcher; the
+        // pipeline is being torn down anyway).
+        await new Promise<unknown>((resolve, reject) => {
+          let settled = false;
+          const onAbort = () => {
+            if (settled) return;
+            settled = true;
+            abortController.signal.removeEventListener('abort', onAbort);
+            reject(new Error('Pipeline aborted'));
+          };
+          if (abortController.signal.aborted) { onAbort(); return; }
+          abortController.signal.addEventListener('abort', onAbort, { once: true });
+          triggerPlugin.watch(task.trigger as Record<string, unknown>, {
+            taskId: node.taskId,
+            trackId: track.id,
+            workDir: task.cwd ?? workDir,
+            signal: abortController.signal,
+            approvalGateway,
+          }).then(
+            (v) => {
+              if (settled) return;
+              settled = true;
+              abortController.signal.removeEventListener('abort', onAbort);
+              resolve(v);
+            },
+            (e) => {
+              if (settled) return;
+              settled = true;
+              abortController.signal.removeEventListener('abort', onAbort);
+              reject(e);
+            },
+          );
         });
         log.debug(`[task:${taskId}]`, `trigger fired`);
       } catch (err: unknown) {
@@ -535,7 +581,17 @@ export async function runPipeline(
           for (const mwConfig of mws) {
             const before = prompt.length;
             const mwPlugin = getHandler<MiddlewarePlugin>('middlewares', mwConfig.type);
-            prompt = await mwPlugin.enhance(prompt, mwConfig as Record<string, unknown>, mwCtx);
+            const next = await mwPlugin.enhance(prompt, mwConfig as Record<string, unknown>, mwCtx);
+            // R3: a middleware that returns undefined / null / a non-string
+            // would silently corrupt the prompt sent to the driver. Fail loud
+            // here so the user sees "middleware X.enhance returned ..." in the
+            // task log instead of "[object Object]" arriving at the model.
+            if (typeof next !== 'string') {
+              throw new Error(
+                `middleware "${mwConfig.type}".enhance() returned ${next === null ? 'null' : typeof next}, expected string`
+              );
+            }
+            prompt = next;
             log.debug(`[task:${taskId}]`,
               `  ${mwConfig.type}: ${before} → ${prompt.length} chars`);
           }
@@ -570,6 +626,13 @@ export async function runPipeline(
         const plugin = getHandler<CompletionPlugin>('completions', task.completion.type);
         const completionCtx = { workDir: task.cwd ?? workDir, signal: abortController.signal };
         const passed = await plugin.check(task.completion as Record<string, unknown>, result, completionCtx);
+        // R4: strict boolean check. Truthy strings/numbers used to be coerced
+        // to success — a check returning "ok" would let a failing task pass.
+        if (typeof passed !== 'boolean') {
+          throw new Error(
+            `completion "${task.completion.type}".check() returned ${passed === null ? 'null' : typeof passed}, expected boolean`
+          );
+        }
         terminalStatus = passed ? 'success' : 'failed';
       } else {
         terminalStatus = 'success';
@@ -588,11 +651,17 @@ export async function runPipeline(
         if (!outputMap.has(bareId)) outputMap.set(bareId, outPath);
       }
 
-      // Store normalized text separately (in-memory) for continue_from handoff
+      // Store normalized text separately (in-memory) for continue_from handoff.
+      // R15: clip oversized values so a runaway parseResult can't accumulate
+      // hundreds of MB across tasks.
       if (result.normalizedOutput !== null) {
-        normalizedMap.set(taskId, result.normalizedOutput);
+        const clipped = result.normalizedOutput.length > MAX_NORMALIZED_BYTES
+          ? result.normalizedOutput.slice(0, MAX_NORMALIZED_BYTES) +
+            `\n[…clipped at ${MAX_NORMALIZED_BYTES} bytes]`
+          : result.normalizedOutput;
+        normalizedMap.set(taskId, clipped);
         const bareId = taskId.includes('.') ? taskId.split('.').pop()! : taskId;
-        if (!normalizedMap.has(bareId)) normalizedMap.set(bareId, result.normalizedOutput);
+        if (!normalizedMap.has(bareId)) normalizedMap.set(bareId, clipped);
       }
 
       if (result.stderr) {
