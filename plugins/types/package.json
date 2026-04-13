@@ -1,6 +1,6 @@
 {
   "name": "@tagma/types",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Shared type surface for Track & Task engine and plugins — types only, no runtime code",
   "type": "module",
   "main": "./src/index.ts",
