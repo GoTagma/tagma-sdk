@@ -10,6 +10,9 @@
   "files": [
     "src"
   ],
+  "engines": {
+    "bun": ">=1.3"
+  },
   "peerDependencies": {
     "@tagma/types": "^0.1.0",
     "bun-types": "*"

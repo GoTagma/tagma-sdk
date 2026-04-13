@@ -2,6 +2,8 @@
 
 A local AI task orchestration SDK for [Bun](https://bun.sh). Define multi-track pipelines in YAML, run AI coding agents (Claude Code, Codex, OpenCode) and shell commands in parallel with dependency resolution, approval gates, and lifecycle hooks.
 
+> **Bun ≥ 1.3 required.** `node` + `npm` are not supported — this package ships TypeScript source (`main: ./src/sdk.ts`) and relies on Bun's native `.ts` loader. Install with `bun add`, not `npm install`.
+
 ## Install
 
 ```bash
