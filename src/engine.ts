@@ -616,7 +616,23 @@ export async function runPipeline(
         result = await runSpawn(spec, driver, runOpts);
       }
 
-      // 5. Determine terminal status (without emitting yet — result must be complete first)
+      // 5. Write output file with RAW stdout (preserves driver output format).
+      // Done BEFORE the completion check so a `file_exists` completion pointing
+      // at `task.output` observes the AI-generated artefact. Writes happen
+      // regardless of exit code so failed/timed-out tasks still leave a
+      // debuggable artefact on disk.
+      if (task.output) {
+        // validatePath enforces no .. traversal and no absolute paths escaping workDir.
+        const outPath = validatePath(task.output, workDir);
+        await mkdir(dirname(outPath), { recursive: true });
+        await Bun.write(outPath, result.stdout);
+        result = { ...result, outputPath: outPath };
+        outputMap.set(taskId, outPath);
+        const bareId = taskId.includes('.') ? taskId.split('.').pop()! : taskId;
+        if (!outputMap.has(bareId)) outputMap.set(bareId, outPath);
+      }
+
+      // 6. Determine terminal status (without emitting yet — result must be complete first)
       let terminalStatus: TaskStatus;
       if (result.exitCode === -1) {
         terminalStatus = 'timeout';
@@ -636,19 +652,6 @@ export async function runPipeline(
         terminalStatus = passed ? 'success' : 'failed';
       } else {
         terminalStatus = 'success';
-      }
-
-      // 6. Write output file with RAW stdout (preserves driver output format).
-      // The separate normalizedMap holds canonical text for continue_from.
-      if (task.output) {
-        // validatePath enforces no .. traversal and no absolute paths escaping workDir.
-        const outPath = validatePath(task.output, workDir);
-        await mkdir(dirname(outPath), { recursive: true });
-        await Bun.write(outPath, result.stdout);
-        result = { ...result, outputPath: outPath };
-        outputMap.set(taskId, outPath);
-        const bareId = taskId.includes('.') ? taskId.split('.').pop()! : taskId;
-        if (!outputMap.has(bareId)) outputMap.set(bareId, outPath);
       }
 
       // Store normalized text separately (in-memory) for continue_from handoff.
