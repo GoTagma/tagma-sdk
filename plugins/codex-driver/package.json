@@ -1,6 +1,6 @@
 {
   "name": "@tagma/driver-codex",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Codex CLI driver for tagma-sdk pipelines",
   "type": "module",
   "main": "./src/index.ts",
@@ -10,6 +10,12 @@
   },
   "files": [
     "src"
+  ],
+  "keywords": [
+    "tagma-plugin",
+    "tagma",
+    "driver",
+    "codex"
   ],
   "engines": {
     "bun": ">=1.3"

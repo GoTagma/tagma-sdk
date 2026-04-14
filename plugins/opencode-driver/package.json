@@ -1,6 +1,6 @@
 {
   "name": "@tagma/driver-opencode",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "OpenCode CLI driver for tagma-sdk pipelines",
   "type": "module",
   "main": "./src/index.ts",
@@ -10,6 +10,12 @@
   },
   "files": [
     "src"
+  ],
+  "keywords": [
+    "tagma-plugin",
+    "tagma",
+    "driver",
+    "opencode"
   ],
   "engines": {
     "bun": ">=1.3"
