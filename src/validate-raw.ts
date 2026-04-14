@@ -16,10 +16,21 @@ function isValidDuration(input: string): boolean {
 const VALID_ON_FAILURE = new Set(['skip_downstream', 'stop_all', 'ignore']);
 const VALID_MODEL_TIERS = new Set(['low', 'medium', 'high']);
 
+export type ValidationSeverity = 'error' | 'warning';
+
 export interface ValidationError {
   /** JSONPath-style location, e.g. "tracks[0].tasks[1].prompt" */
   path: string;
   message: string;
+  /**
+   * H8: not all "errors" are equally fatal. The DAG runtime is happy to
+   * insert implicit `continue_from → depends_on` ordering, so the matching
+   * validate-raw check is a *style* nit, not a hard failure. Severity lets
+   * the editor render it as a soft warning instead of blocking save / run.
+   * Existing call sites that don't read this field still treat every entry
+   * as fatal — defaulting `severity` to undefined preserves that behaviour.
+   */
+  severity?: ValidationSeverity;
 }
 
 /**
@@ -180,9 +191,15 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
         } else if (!task.depends_on || !task.depends_on.some(dep =>
           resolveDepRef(dep, track.id, allQualified, bareToQualified) === resolved
         )) {
+          // H8: demote to a warning. dag.ts/buildDag inserts continue_from
+          // as an implicit dependency at runtime, so the pipeline runs fine
+          // without the explicit listing. Treat as a style hint rather than
+          // blocking save / run, otherwise we frighten users with a red
+          // "Configuration error" for code that would have run successfully.
           errors.push({
             path: `${taskPath}.continue_from`,
-            message: `Task "${task.id}": continue_from "${task.continue_from}" should also be listed in depends_on to ensure ordering`,
+            message: `Task "${task.id}": continue_from "${task.continue_from}" should also be listed in depends_on for clarity (the runtime will add it implicitly).`,
+            severity: 'warning',
           });
         }
       }

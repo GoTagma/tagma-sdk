@@ -21,6 +21,23 @@ import type { ApprovalGateway, ApprovalEvent } from '../approval';
 export interface WebSocketApprovalAdapterOptions {
   port?: number;      // default: 3000
   hostname?: string;  // default: 'localhost'
+  /**
+   * M11: shared secret required from the client during the WebSocket
+   * upgrade. The token can be supplied either as the `?token=` query
+   * parameter or in the `x-tagma-token` request header. When set, any
+   * upgrade request that fails the check is rejected with HTTP 401 and
+   * never reaches the WebSocket layer (so a misconfigured client cannot
+   * exhaust rate-limit slots either). Leave undefined for backward
+   * compatibility with localhost-only deployments.
+   */
+  token?: string;
+  /**
+   * M11: opt-out of origin checking. Defaults to false, meaning we accept
+   * any origin (including no Origin header). The recommended setup is to
+   * combine `token` with hostname='localhost' / loopback bind so the
+   * adapter is reachable only by trusted local processes.
+   */
+  allowAnyOrigin?: boolean;
 }
 
 export interface WebSocketApprovalAdapter {
@@ -40,6 +57,7 @@ export function attachWebSocketApprovalAdapter(
 ): WebSocketApprovalAdapter {
   const port = options.port ?? 3000;
   const hostname = options.hostname ?? 'localhost';
+  const requiredToken = options.token ?? null;
 
   type WS = import('bun').ServerWebSocket<unknown>;
   const clients = new Set<WS>();
@@ -74,6 +92,19 @@ export function attachWebSocketApprovalAdapter(
     hostname,
 
     fetch(req, server) {
+      // M11: enforce token before any upgrade so an unauthenticated client
+      // can't even open a socket. Tokens may arrive via header or query.
+      if (requiredToken !== null) {
+        const headerToken = req.headers.get('x-tagma-token') ?? '';
+        let queryToken = '';
+        try {
+          queryToken = new URL(req.url).searchParams.get('token') ?? '';
+        } catch { /* malformed URL — leave queryToken empty */ }
+        const presented = headerToken || queryToken;
+        if (presented !== requiredToken) {
+          return new Response('unauthorized', { status: 401 });
+        }
+      }
       if (server.upgrade(req)) return undefined;
       return new Response('tagma-sdk WebSocket approval endpoint', { status: 426 });
     },

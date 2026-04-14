@@ -81,7 +81,20 @@ const OpenCodeDriver: DriverPlugin = {
       const json = JSON.parse(stdout);
 
       if (json.type === 'error') {
-        return { normalizedOutput: undefined };
+        // M12: opencode emits {type:"error", error:{...}} JSON payloads with
+        // exit code 0 for transient API failures. Without this branch the
+        // engine treated those as success and downstream tasks ran on top
+        // of the bogus output. Force a failure so the user sees a useful
+        // error in the UI and skip_downstream / stop_all kick in.
+        const reason = typeof json.error?.message === 'string'
+          ? `opencode reported error: ${json.error.message}`
+          : typeof json.error === 'string'
+          ? `opencode reported error: ${json.error}`
+          : 'opencode emitted an error JSON payload';
+        return {
+          forceFailure: true,
+          forceFailureReason: reason,
+        };
       }
       return {
         sessionId: json.session_id ?? json.sessionId ?? null,

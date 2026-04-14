@@ -101,7 +101,11 @@ function resolveWindowsExe(
   return args;
 }
 
-/** Build a "failed before spawn" result. */
+/**
+ * H2: Build a "failed before spawn" result. Tagged as 'spawn_error' so the
+ * engine can show a useful classification ("driver tried to launch X but
+ * the binary wasn't found") rather than the misleading "timeout".
+ */
 function failResult(stderr: string, durationMs: number): TaskResult {
   return {
     exitCode: -1,
@@ -112,6 +116,7 @@ function failResult(stderr: string, durationMs: number): TaskResult {
     durationMs,
     sessionId: null,
     normalizedOutput: null,
+    failureKind: 'spawn_error',
   };
 }
 
@@ -289,6 +294,9 @@ export async function runSpawn(
       durationMs,
       sessionId: null,
       normalizedOutput: null,
+      // H2: explicit kind so engine.ts no longer has to guess "is exitCode -1
+      // a timeout or a spawn-failure?" Both used to share the same code.
+      failureKind: 'timeout',
     };
   }
 
@@ -299,6 +307,12 @@ export async function runSpawn(
   // value doesn't poison sessionMap/normalizedMap downstream.
   let sessionId: string | null = null;
   let normalizedOutput: string | null = null;
+  // M12: drivers can flip a task's terminal status to failed even when the
+  // process exited 0 (e.g. opencode returning `{type:"error"}` JSON). When
+  // the flag is set, we synthesize a non-zero exit code and append a reason
+  // line to stderr so engine.ts marks the task as failed with a useful
+  // explanation instead of letting the error JSON pass through as success.
+  let forcedFailureMessage: string | null = null;
   if (driver?.parseResult) {
     try {
       const meta = driver.parseResult(stdout, stderr);
@@ -308,6 +322,11 @@ export async function runSpawn(
         }
         if (typeof meta.normalizedOutput === 'string') {
           normalizedOutput = meta.normalizedOutput;
+        }
+        if (meta.forceFailure === true) {
+          forcedFailureMessage = typeof meta.forceFailureReason === 'string'
+            ? meta.forceFailureReason
+            : 'Driver flagged task as failed (forceFailure)';
         }
       }
     } catch (err) {
@@ -325,10 +344,32 @@ export async function runSpawn(
         durationMs,
         sessionId: null,
         normalizedOutput: null,
+        // H2: parseResult threw — the spawn itself succeeded, so the failure
+        // is "the process exited but the driver couldn't parse it". Surface
+        // that as exit_nonzero (when the actual exit was non-zero) or null
+        // (when the underlying exit was 0 — UI will still mark it failed via
+        // engine.ts because the result is incomplete).
+        failureKind: exitCode === 0 ? null : 'exit_nonzero',
       };
     }
   }
 
+  // M12: when the driver forced a failure, treat as exit_nonzero with the
+  // reason appended to stderr so users see WHY the task failed without
+  // having to dig through driver-specific JSON.
+  if (forcedFailureMessage !== null) {
+    return {
+      exitCode: exitCode === 0 ? 1 : exitCode,
+      stdout,
+      stderr: stderr + (stderr.endsWith('\n') ? '' : '\n') + `[driver] ${forcedFailureMessage}`,
+      outputPath: null,
+      stderrPath: null,
+      durationMs,
+      sessionId,
+      normalizedOutput,
+      failureKind: 'exit_nonzero',
+    };
+  }
   return {
     exitCode,
     stdout,
@@ -338,6 +379,9 @@ export async function runSpawn(
     durationMs,
     sessionId,
     normalizedOutput,
+    // H2: success vs nonzero exit. Engine uses this to short-circuit the
+    // timeout branch even if a third-party driver returns -1 by mistake.
+    failureKind: exitCode === 0 ? null : 'exit_nonzero',
   };
 }
 

@@ -19,8 +19,14 @@ import type {
   DriverContext, SpawnSpec, Permissions,
 } from '@tagma/types';
 
+// L5 / M2: Codex currently exposes a single public coding model
+// (`gpt-5-codex`) that supports `model_reasoning_effort` for tier control.
+// Older revisions of this file pinned an unreleased `gpt-5.3-codex`
+// placeholder which produced a 404 the moment the user actually ran a task.
+// Until the upstream CLI exposes per-tier model variants, all tiers map to
+// the same model name and tier control happens via reasoning effort below.
 const MODEL_MAP: Record<string, string> = {
-  high: 'gpt-5.3-codex', medium: 'gpt-5.3-codex', low: 'gpt-5.3-codex',
+  high: 'gpt-5-codex', medium: 'gpt-5-codex', low: 'gpt-5-codex',
 };
 
 // Codex model reasoning effort — only 'low' | 'medium' | 'high' are supported
@@ -35,6 +41,30 @@ function resolveModel(tier: string): string {
 
 function resolveReasoningEffort(tier: string): string {
   return REASONING_EFFORT_MAP[tier] ?? 'medium';
+}
+
+// M1: cache the `codex --version` probe at module level so a pipeline with
+// 10 codex tasks doesn't pay the spawnSync tax 10 times. spawnSync blocks
+// the event loop for ~50–200ms each invocation. The probe result only needs
+// to be re-checked when the module is reloaded (process restart).
+let codexAvailable: boolean | null = null;
+function ensureCodexAvailable(): void {
+  if (codexAvailable === null) {
+    try {
+      const r = Bun.spawnSync(['codex', '--version'], {
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+      codexAvailable = r.exitCode === 0;
+    } catch {
+      codexAvailable = false;
+    }
+  }
+  if (!codexAvailable) {
+    throw new Error(
+      'codex CLI not found on PATH. Install via: npm i -g @openai/codex',
+    );
+  }
 }
 
 // Map permissions to Codex --sandbox policy.
@@ -59,14 +89,8 @@ const CodexDriver: DriverPlugin = {
   async buildCommand(
     task: TaskConfig, track: TrackConfig, ctx: DriverContext,
   ): Promise<SpawnSpec> {
-    // Preflight: verify the codex CLI is available on PATH
-    try {
-      Bun.spawnSync(['codex', '--version'], { stdout: 'ignore', stderr: 'ignore' });
-    } catch {
-      throw new Error(
-        'codex CLI not found on PATH. Install via: npm i -g @openai/codex',
-      );
-    }
+    // M1: cached preflight (see ensureCodexAvailable above).
+    ensureCodexAvailable();
     const tier = task.model_tier ?? track.model_tier ?? 'medium';
     const model = resolveModel(tier);
     const reasoningEffort = resolveReasoningEffort(tier);

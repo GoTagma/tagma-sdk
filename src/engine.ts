@@ -375,14 +375,23 @@ export async function runPipeline(
     }
   }
 
-  function applyStopAll(trackId: string): void {
+  /**
+   * H3: "stop_all" historically only stopped tasks within the same track,
+   * which contradicted both its name and user expectations. It now stops
+   * the **entire pipeline**:
+   *   - In-flight tasks are signalled via the shared abort controller so
+   *     drivers / runner.ts can cancel cooperatively (returning
+   *     `failureKind: 'timeout'`).
+   *   - Still-waiting tasks across every track are immediately marked
+   *     skipped so the run completes promptly.
+   * The terminal lock in setTaskStatus prevents any later re-transition
+   * should a completed running task try to overwrite the skipped state.
+   */
+  function applyStopAll(_failedTrackId: string): void {
+    pipelineAborted = true;
+    abortController.abort();
     for (const [id, state] of states) {
-      // Only skip tasks that are still waiting — tasks already running must be
-      // allowed to complete naturally so their process is not orphaned and their
-      // final status (success/failed/timeout) is recorded correctly.
-      // The terminal lock in setTaskStatus prevents any later re-transition
-      // should a completed running task try to overwrite the skipped state.
-      if (state.trackConfig.id === trackId && state.status === 'waiting') {
+      if (state.status === 'waiting') {
         state.finishedAt = nowISO();
         setTaskStatus(id, 'skipped');
       }
@@ -600,7 +609,17 @@ export async function runPipeline(
           `prompt: ${originalLen} chars (final: ${prompt.length} chars)`);
         log.quiet(`--- prompt (final) ---\n${clip(prompt)}\n--- end prompt ---`, taskId);
 
-        const enrichedTask: TaskConfig = { ...task, prompt };
+        // H1: hand the driver a continue_from that has already been
+        // qualified by dag.ts. Without this, drivers like codex/opencode/
+        // claude-code do `outputMap.get(task.continue_from)` directly with
+        // the user's raw (possibly bare) string, which races whenever two
+        // tracks share a task name. dag.ts has the only authoritative
+        // resolver, so we use its precomputed answer here.
+        const enrichedTask: TaskConfig = {
+          ...task,
+          prompt,
+          continue_from: node.resolvedContinueFrom ?? task.continue_from,
+        };
         const driverCtx: DriverContext = {
           sessionMap, outputMap, normalizedMap, workDir: task.cwd ?? workDir,
         };
@@ -627,14 +646,30 @@ export async function runPipeline(
         await mkdir(dirname(outPath), { recursive: true });
         await Bun.write(outPath, result.stdout);
         result = { ...result, outputPath: outPath };
+        // H1: only write the fully-qualified taskId. The previous "also store
+        // bare id when not yet present" trick produced non-deterministic
+        // continue_from lookups when two tracks shared a task name —
+        // whichever finished first won the bare key. dag.ts now resolves
+        // continue_from to a qualified id (DagNode.resolvedContinueFrom),
+        // and the enrichedTask handed to drivers carries that qualified
+        // version, so bare keys are no longer needed.
         outputMap.set(taskId, outPath);
-        const bareId = taskId.includes('.') ? taskId.split('.').pop()! : taskId;
-        if (!outputMap.has(bareId)) outputMap.set(bareId, outPath);
       }
 
       // 6. Determine terminal status (without emitting yet — result must be complete first)
+      // H2: branch on failureKind so spawn errors no longer masquerade as
+      // timeouts. Old runners that don't set failureKind still work — we
+      // fall back to the historical `exitCode === -1 → timeout` heuristic so
+      // pre-existing third-party drivers don't regress.
       let terminalStatus: TaskStatus;
-      if (result.exitCode === -1) {
+      const kind = result.failureKind;
+      if (kind === 'timeout') {
+        terminalStatus = 'timeout';
+      } else if (kind === 'spawn_error') {
+        terminalStatus = 'failed';
+      } else if (kind === undefined && result.exitCode === -1) {
+        // Legacy path: pre-H2 driver returned -1 with no kind. Treat as
+        // timeout for backward compatibility (the previous behaviour).
         terminalStatus = 'timeout';
       } else if (result.exitCode !== 0) {
         terminalStatus = 'failed';
@@ -662,9 +697,8 @@ export async function runPipeline(
           ? result.normalizedOutput.slice(0, MAX_NORMALIZED_BYTES) +
             `\n[…clipped at ${MAX_NORMALIZED_BYTES} bytes]`
           : result.normalizedOutput;
+        // H1: qualified-only key (see comment near outputMap above).
         normalizedMap.set(taskId, clipped);
-        const bareId = taskId.includes('.') ? taskId.split('.').pop()! : taskId;
-        if (!normalizedMap.has(bareId)) normalizedMap.set(bareId, clipped);
       }
 
       if (result.stderr) {
@@ -674,9 +708,8 @@ export async function runPipeline(
       }
 
       if (result.sessionId) {
+        // H1: qualified-only key (see comment near outputMap above).
         sessionMap.set(taskId, result.sessionId);
-        const bareId = taskId.includes('.') ? taskId.split('.').pop()! : taskId;
-        if (!sessionMap.has(bareId)) sessionMap.set(bareId, result.sessionId);
       }
 
       // Set result and finishedAt before emitting terminal status so listeners see complete state
@@ -729,6 +762,10 @@ export async function runPipeline(
         stderr: errMsg,
         outputPath: null, stderrPath: null, durationMs: 0,
         sessionId: null, normalizedOutput: null,
+        // H2: Engine-level pre-execution errors (driver throw, middleware
+        // throw, getHandler 404) classify as spawn_error — the process never
+        // ran, so calling them "timeout" was actively misleading.
+        failureKind: 'spawn_error',
       };
       state.finishedAt = nowISO();
       setTaskStatus(taskId, 'failed');

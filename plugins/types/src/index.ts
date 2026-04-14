@@ -17,6 +17,16 @@ export type TaskStatus =
   | 'skipped'
   | 'blocked';
 
+/**
+ * What to do when a task in this track fails.
+ *  - `ignore`          : downstream tasks see the failure as success (best-effort).
+ *  - `skip_downstream` : downstream tasks of the failed task get marked skipped.
+ *  - `stop_all`        : H3 — abort the *entire pipeline* (signals the abort
+ *                        controller, marks every still-waiting task as
+ *                        skipped). Up until 2026-04 this only stopped the
+ *                        track containing the failure, which contradicted
+ *                        the name and surprised users.
+ */
 export type OnFailure = 'ignore' | 'skip_downstream' | 'stop_all';
 
 // ═══ Permissions ═══
@@ -228,6 +238,16 @@ export interface DriverCapabilities {
 export interface DriverResultMeta {
   readonly sessionId?: string;
   readonly normalizedOutput?: string;  // canonical text for continue_from handoff
+  /**
+   * M12: drivers can mark a task as failed even when the underlying process
+   * exited 0. Common case: the CLI returns `{type:"error"}` JSON with exit
+   * code 0 (opencode does this for transient API failures). Engine.ts
+   * inspects this flag in step 6 (terminal status determination) and treats
+   * a true value as if the exitCode were non-zero, with the optional
+   * `forceFailureReason` appended to stderr for visibility.
+   */
+  readonly forceFailure?: boolean;
+  readonly forceFailureReason?: string;
 }
 
 // ═══ Driver Context ═══
@@ -339,6 +359,21 @@ export interface MiddlewarePlugin {
 
 // ═══ Task Result ═══
 
+/**
+ * H2: distinguishes the *reason* a task didn't return exitCode 0. The legacy
+ * `exitCode === -1` overload was used by both timeout and pre-spawn errors
+ * (e.g. ENOENT, bad SpawnSpec), which made spawn failures display as
+ * "timeout" in the UI. Engines and UIs should branch on `failureKind`
+ * instead of inferring from `exitCode`.
+ *
+ * `null` means "no failure" (success case).
+ */
+export type TaskFailureKind =
+  | 'timeout'
+  | 'spawn_error'
+  | 'exit_nonzero'
+  | null;
+
 export interface TaskResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -348,6 +383,12 @@ export interface TaskResult {
   readonly durationMs: number;
   readonly sessionId: string | null;
   readonly normalizedOutput: string | null;
+  /**
+   * H2: optional for backward compatibility with existing TaskResult
+   * literals scattered across drivers. New code (runner.ts, engine.ts)
+   * always populates it. Defaults to `null` (success / no classification).
+   */
+  readonly failureKind?: TaskFailureKind;
 }
 
 // ═══ Runtime Task State (mutable engine state — exposed for hook context typing) ═══

@@ -5,6 +5,15 @@ export interface DagNode {
   readonly task: TaskConfig;
   readonly track: TrackConfig;
   readonly dependsOn: readonly string[];
+  /**
+   * H1: `task.continue_from` may be written by users as a bare task id
+   * (e.g. `review`) or a same-track shorthand. The driver needs the
+   * fully-qualified upstream id to look up output/session/normalized maps
+   * deterministically — bare lookups race when two tracks happen to share
+   * a task name. dag.ts performs the qualification once, here, so the
+   * engine never has to.
+   */
+  readonly resolvedContinueFrom?: string;
 }
 
 export interface Dag {
@@ -77,6 +86,7 @@ export function buildDag(config: PipelineConfig): Dag {
     for (const task of track.tasks) {
       const qid = qualifyId(track.id, task.id);
       const deps: string[] = [];
+      let resolvedContinueFrom: string | undefined;
 
       if (task.depends_on) {
         for (const dep of task.depends_on) {
@@ -93,14 +103,15 @@ export function buildDag(config: PipelineConfig): Dag {
             `Use a fully-qualified reference (trackId.taskId) or ensure the target task exists.`
           );
         }
+        resolvedContinueFrom = resolved;
         if (!deps.includes(resolved)) {
           deps.push(resolved); // continue_from implies dependency
         }
       }
 
-      // Replace node with resolved deps
+      // Replace node with resolved deps + qualified continue_from.
       const node = nodes.get(qid)!;
-      nodes.set(qid, { ...node, dependsOn: deps });
+      nodes.set(qid, { ...node, dependsOn: deps, resolvedContinueFrom });
     }
   }
 
