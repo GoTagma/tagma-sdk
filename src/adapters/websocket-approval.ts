@@ -32,10 +32,10 @@ export interface WebSocketApprovalAdapterOptions {
    */
   token?: string;
   /**
-   * M11: opt-out of origin checking. Defaults to false, meaning we accept
-   * any origin (including no Origin header). The recommended setup is to
-   * combine `token` with hostname='localhost' / loopback bind so the
-   * adapter is reachable only by trusted local processes.
+   * M11: opt-out of origin checking. Defaults to false, meaning Origin
+   * headers are restricted to loopback hosts (localhost / 127.0.0.1 / ::1).
+   * Requests without an Origin header are still allowed so non-browser local
+   * clients can connect. Set true only for trusted reverse-proxy setups.
    */
   allowAnyOrigin?: boolean;
 }
@@ -58,6 +58,16 @@ export function attachWebSocketApprovalAdapter(
   const port = options.port ?? 3000;
   const hostname = options.hostname ?? 'localhost';
   const requiredToken = options.token ?? null;
+  const enforceOriginCheck = options.allowAnyOrigin !== true;
+
+  function isLoopbackOrigin(origin: string): boolean {
+    try {
+      const host = new URL(origin).hostname.toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    } catch {
+      return false;
+    }
+  }
 
   type WS = import('bun').ServerWebSocket<unknown>;
   const clients = new Set<WS>();
@@ -92,6 +102,12 @@ export function attachWebSocketApprovalAdapter(
     hostname,
 
     fetch(req, server) {
+      if (enforceOriginCheck) {
+        const origin = req.headers.get('origin');
+        if (origin && !isLoopbackOrigin(origin)) {
+          return new Response('forbidden origin', { status: 403 });
+        }
+      }
       // M11: enforce token before any upgrade so an unauthenticated client
       // can't even open a socket. Tokens may arrive via header or query.
       if (requiredToken !== null) {
