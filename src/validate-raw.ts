@@ -111,19 +111,30 @@ export function validateRaw(config: RawPipelineConfig): ValidationError[] {
       // Template-based tasks: skip prompt/command checks (params validated at runtime)
       if (task.use) continue;
 
-      const hasPrompt = typeof task.prompt === 'string' && task.prompt.trim().length > 0;
-      const hasCommand = typeof task.command === 'string' && task.command.trim().length > 0;
+      const hasPromptKey = typeof task.prompt === 'string';
+      const hasCommandKey = typeof task.command === 'string';
+      const promptEmpty = hasPromptKey && task.prompt!.trim().length === 0;
+      const commandEmpty = hasCommandKey && task.command!.trim().length === 0;
 
-      if (!hasPrompt && !hasCommand) {
+      if (hasPromptKey && hasCommandKey) {
+        errors.push({
+          path: taskPath,
+          message: `Task "${task.id}": cannot have both "prompt" and "command"`,
+        });
+      } else if (!hasPromptKey && !hasCommandKey) {
         errors.push({
           path: taskPath,
           message: `Task "${task.id}": must have "prompt" or "command"`,
         });
-      }
-      if (hasPrompt && hasCommand) {
+      } else if (promptEmpty) {
         errors.push({
           path: taskPath,
-          message: `Task "${task.id}": cannot have both "prompt" and "command"`,
+          message: `Task "${task.id}": prompt content cannot be empty`,
+        });
+      } else if (commandEmpty) {
+        errors.push({
+          path: taskPath,
+          message: `Task "${task.id}": command content cannot be empty`,
         });
       }
 

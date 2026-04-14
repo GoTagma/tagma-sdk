@@ -41,14 +41,16 @@ function validateRawTask(task: RawTaskConfig, trackId: string): void {
   if (!task.id) throw new Error(`track "${trackId}": task.id is required`);
   if (task.use) return; // template usage, validated later
 
-  const hasPrompt = typeof task.prompt === 'string' && task.prompt.length > 0;
-  const hasCommand = typeof task.command === 'string' && task.command.length > 0;
-  if (!hasPrompt && !hasCommand) {
+  const hasPromptKey = typeof task.prompt === 'string';
+  const hasCommandKey = typeof task.command === 'string';
+  if (!hasPromptKey && !hasCommandKey) {
     throw new Error(`task "${task.id}": must have either "prompt" or "command"`);
   }
-  if (hasPrompt && hasCommand) {
+  if (hasPromptKey && hasCommandKey) {
     throw new Error(`task "${task.id}": cannot have both "prompt" and "command"`);
   }
+  // Empty-content tasks (e.g. `prompt: ''`) are allowed at parse time and
+  // flagged as non-fatal validation errors by validate-raw.ts.
 }
 
 // ═══ Template Expansion ═══
