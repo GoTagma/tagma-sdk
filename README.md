@@ -4,7 +4,12 @@
 
 This repository is deprecated and no longer maintained.
 
-Please use: [tagma-mono]([https://github.com/your-org/new-repo](https://github.com/GoTagma/tagma-mono))
+Please use: [tagma-mono](https://github.com/GoTagma/tagma-mono)
+
+
+
+
+
 
 
 > ## ⚠️ Bun-only package — do **not** `npm install`
